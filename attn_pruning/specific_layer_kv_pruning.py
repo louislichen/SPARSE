@@ -23,6 +23,8 @@ def custom_qwen2moe_forward(
     **kwargs,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     
+    global SHARED_MASK
+    
     def rotate_half(x):
         x1 = x[..., : x.shape[-1] // 2]
         x2 = x[..., x.shape[-1] // 2 :]
@@ -82,24 +84,38 @@ def custom_qwen2moe_forward(
     else:
         valid_total = attn_weights.numel()
 
-    if CURRENT_THRESHOLD < 1.0:
+    if self.layer_idx == 0:
         probs = attn_weights.float()
         sorted_vals, sorted_indices = torch.sort(probs, descending=True, dim=-1)
         cumulative_probs = torch.cumsum(sorted_vals, dim=-1)
 
-        mask_to_remove = cumulative_probs > CURRENT_THRESHOLD
-        mask_to_remove[..., 0] = False
+        mask_to_remove = cumulative_probs > FIXED_THRESHOLD
+        mask_to_remove[..., 0] = False 
 
         final_mask = torch.zeros_like(probs, dtype=torch.bool)
         final_mask.scatter_(dim=-1, index=sorted_indices, src=mask_to_remove)
+        
+        SHARED_MASK = final_mask 
 
         kept_count = (~final_mask).sum().item()
         LAYER_STATS[self.layer_idx]['total'] += valid_total
         LAYER_STATS[self.layer_idx]['kept'] += kept_count
 
         attn_weights = attn_weights.masked_fill(final_mask, 0.0)
-        
         attn_weights = attn_weights / (attn_weights.sum(dim=-1, keepdim=True) + 1e-9)
+
+    elif 0 < self.layer_idx <= TARGET_FOLLOW_DEPTH:
+        if SHARED_MASK is not None:
+            kept_count = (~SHARED_MASK).sum().item()
+            LAYER_STATS[self.layer_idx]['total'] += valid_total
+            LAYER_STATS[self.layer_idx]['kept'] += kept_count
+            
+            attn_weights = attn_weights.masked_fill(SHARED_MASK, 0.0)
+            attn_weights = attn_weights / (attn_weights.sum(dim=-1, keepdim=True) + 1e-9)
+        else:
+            LAYER_STATS[self.layer_idx]['total'] += valid_total
+            LAYER_STATS[self.layer_idx]['kept'] += valid_total
+
     else:
         LAYER_STATS[self.layer_idx]['total'] += valid_total
         LAYER_STATS[self.layer_idx]['kept'] += valid_total
@@ -112,22 +128,24 @@ def custom_qwen2moe_forward(
     return attn_output, attn_weights
 
 
-CURRENT_THRESHOLD = 1.0 
+FIXED_THRESHOLD = 0.85   
+TARGET_FOLLOW_DEPTH = 0  
+SHARED_MASK = None       
 LAYER_STATS = defaultdict(lambda: {'total': 0, 'kept': 0})
 
+
 def main():
-    global CURRENT_THRESHOLD
+    global TARGET_FOLLOW_DEPTH, SHARED_MASK, FIXED_THRESHOLD
     
     MODEL_PATH = "/home/ztl/.cache/huggingface/hub/models--Qwen--Qwen1.5-MoE-A2.7B-Chat/snapshots/ec052fda178e241c7c443468d2fa1db6618996be"
     DATA_PATH = "/home/ztl/wyf/ICMoE/datasets/c4_local/c4-train.00000-of-01024.json.gz"
-    SAVE_DIR = "/home/ztl/cl/LLM_Partition/results/dynamic_kv_pruning"
+    SAVE_DIR = "/home/ztl/cl/LLM_Partition/results/specific_layer_kv_pruning"
     os.makedirs(SAVE_DIR, exist_ok=True)
 
     SEQ_LEN = 1024  
     NUM_SAMPLES = 100
-    THRESHOLDS = np.linspace(0.99, 1.0, 21)[::-1].tolist() 
-    if THRESHOLDS[0] != 1.0:
-        THRESHOLDS.insert(0, 1.0)
+
+    DEPTH_EXPERIMENTS = [0, 1, 2, 3, 4]
 
     print("Loading Model...")
     tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=True)
@@ -158,18 +176,21 @@ def main():
 
     print(f"Running Experiments...")
     results = []
-    baseline_ppl = None
 
-    for thresh in THRESHOLDS:
+    for depth in DEPTH_EXPERIMENTS:
         torch.cuda.empty_cache()
         gc.collect()
-        CURRENT_THRESHOLD = thresh
+        
+        TARGET_FOLLOW_DEPTH = depth
         LAYER_STATS.clear()
         losses = []
         
+        print(f"--- Experiment: Layers 0 to {depth} use Layer 0's Mask ---")
+        
         try:
-            desc = "Baseline" if thresh == 1.0 else f"Sparse {thresh:.3f}"
-            for text in tqdm(eval_texts, desc=desc, leave=False):
+            for text in tqdm(eval_texts, leave=False):
+                SHARED_MASK = None 
+                
                 inputs = tokenizer(text, return_tensors="pt", max_length=SEQ_LEN, truncation=True).to("cuda")
                 with torch.no_grad():
                     out = model(**inputs, labels=inputs["input_ids"])
@@ -177,60 +198,45 @@ def main():
             
             avg_nll = np.mean(losses)
             ppl = np.exp(avg_nll)
-
-            if thresh == 1.0:
-                baseline_ppl = ppl
-                print(f"Baseline PPL: {ppl:.4f}")
-
+            
             t_total = sum(s['total'] for s in LAYER_STATS.values())
-            savings = 0.0
-            if t_total > 0:
-                t_kept = sum(s['kept'] for s in LAYER_STATS.values())
-                savings = 1.0 - (t_kept / t_total)
+            t_kept = sum(s['kept'] for s in LAYER_STATS.values())
+            global_savings = 1.0 - (t_kept / t_total) if t_total > 0 else 0
 
-            ppl_increase_pct = 0.0
-            if baseline_ppl is not None:
-                ppl_increase_pct = (ppl - baseline_ppl) / baseline_ppl * 100
-                
-            print(f"P={thresh:.3f} | PPL: {ppl:.4f} (+{ppl_increase_pct:.2f}%) | Savings: {savings:.2%}")
+            print(f"Follow Depth: {depth} | PPL: {ppl:.4f} | Avg Savings: {global_savings:.2%}")
             
             results.append({
-                "Threshold": thresh, 
+                "Follow_Depth": depth, 
                 "PPL": ppl, 
-                "PPL_Increase_%": ppl_increase_pct,
-                "Savings": savings
+                "Global_Savings": global_savings
             })
             
         except Exception as e:
-            print(f"Error at {thresh}: {e}")
+            print(f"Error at depth {depth}: {e}")
             import traceback
             traceback.print_exc()
             break
 
     if len(results) > 0:
         df = pd.DataFrame(results)
-        df.to_csv(os.path.join(SAVE_DIR, "results_increase.csv"), index=False)
+        df.to_csv(os.path.join(SAVE_DIR, "consistency_results.csv"), index=False)
         
         sns.set_theme(style="whitegrid")
         fig, ax1 = plt.subplots(figsize=(10, 6))
-        color1, color2 = 'tab:red', 'tab:blue'
         
-        ax1.set_xlabel('Cumulative Probability Threshold')
-        ax1.set_ylabel('PPL Increase (%)', color=color1, fontweight='bold')
-        ax1.plot(df["Threshold"], df["PPL_Increase_%"], marker='o', color=color1, label="PPL Degradation")
-        ax1.tick_params(axis='y', labelcolor=color1)
-        
-        ax1.axhline(1.0, color='gray', linestyle=':', alpha=0.7, label='1% Threshold')
-        ax1.set_xlim(1.001, 0.989) 
+        ax1.set_xlabel('Number of Following Layers (Depth)')
+        ax1.set_ylabel('Perplexity (Lower is Better)', color='tab:red', fontweight='bold')
+        ax1.plot(df["Follow_Depth"], df["PPL"], marker='o', color='tab:red', label="PPL")
+        ax1.tick_params(axis='y', labelcolor='tab:red')
         
         ax2 = ax1.twinx()
-        ax2.set_ylabel('Memory/Compute Savings (%)', color=color2, fontweight='bold')
-        ax2.plot(df["Threshold"], df["Savings"]*100, marker='s', linestyle='--', color=color2, label="Savings")
-        ax2.tick_params(axis='y', labelcolor=color2)
+        ax2.set_ylabel('Total Compute Savings (%)', color='tab:blue', fontweight='bold')
+        ax2.plot(df["Follow_Depth"], df["Global_Savings"]*100, marker='s', linestyle='--', color='tab:blue', label="Savings")
+        ax2.tick_params(axis='y', labelcolor='tab:blue')
         
-        plt.title(f"Trade-off: Precision Loss vs Memory Savings\n(Simulating KV Cache Pruning)")
+        plt.title(f"Consistency Check: Propagating Layer 0 Mask (Threshold={FIXED_THRESHOLD})\nEffect on PPL vs # of Layers Forced")
         plt.tight_layout()
-        plt.savefig(os.path.join(SAVE_DIR, "tradeoff_chart.png"))
+        plt.savefig(os.path.join(SAVE_DIR, "consistency_tradeoff.png"))
         print(f"Done. Saved to {SAVE_DIR}")
 
 
