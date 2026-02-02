@@ -23,7 +23,7 @@ def custom_qwen2moe_forward(
     **kwargs,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     
-    global SHARED_MASK
+    global INTER_LAYER_CACHE
     
     def rotate_half(x):
         x1 = x[..., : x.shape[-1] // 2]
@@ -76,51 +76,61 @@ def custom_qwen2moe_forward(
         causal_mask = attention_mask[:, :, :, : key_states.shape[-2]]
         attn_weights = attn_weights + causal_mask
 
-    attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
-
     kv_seq_len = key_states.shape[-2]
     if q_len == kv_seq_len:
-        valid_total = bsz * num_heads * (q_len * (q_len + 1)) // 2
+        valid_total = bsz * (q_len * (q_len + 1)) // 2
     else:
-        valid_total = attn_weights.numel()
+        valid_total = attn_weights.numel() // num_heads
 
     if self.layer_idx == 0:
-        probs = attn_weights.float()
+        probs = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32)
+        
         sorted_vals, sorted_indices = torch.sort(probs, descending=True, dim=-1)
         cumulative_probs = torch.cumsum(sorted_vals, dim=-1)
-
-        mask_to_remove = cumulative_probs > FIXED_THRESHOLD
-        mask_to_remove[..., 0] = False 
-
-        final_mask = torch.zeros_like(probs, dtype=torch.bool)
-        final_mask.scatter_(dim=-1, index=sorted_indices, src=mask_to_remove)
         
-        SHARED_MASK = final_mask 
-
-        kept_count = (~final_mask).sum().item()
+        mask_to_remove = cumulative_probs > FIXED_THRESHOLD
+        mask_to_remove[..., 0] = False # 保护第一个 token
+        
+        mask_L0 = torch.zeros_like(probs, dtype=torch.bool)
+        mask_L0.scatter_(dim=-1, index=sorted_indices, src=mask_to_remove)
+        
+        mask_L0_union = torch.amin(mask_L0, dim=1, keepdim=True).to(torch.bool)
+        INTER_LAYER_CACHE["layer0_mask"] = mask_L0_union.detach().clone()
+        
+        final_weights = probs.masked_fill(mask_L0, 0.0)
+        final_weights = final_weights / (final_weights.sum(dim=-1, keepdim=True) + 1e-9)
+        
+        kept_count = (~mask_L0_union).sum().item()
         LAYER_STATS[self.layer_idx]['total'] += valid_total
         LAYER_STATS[self.layer_idx]['kept'] += kept_count
 
-        attn_weights = attn_weights.masked_fill(final_mask, 0.0)
-        attn_weights = attn_weights / (attn_weights.sum(dim=-1, keepdim=True) + 1e-9)
-
     elif 0 < self.layer_idx <= TARGET_FOLLOW_DEPTH:
-        if SHARED_MASK is not None:
-            kept_count = (~SHARED_MASK).sum().item()
+        mask_L0 = INTER_LAYER_CACHE.get("layer0_mask")
+        
+        if mask_L0 is not None:
+            if mask_L0.device != attn_weights.device:
+                mask_L0 = mask_L0.to(attn_weights.device)
+            
+            attn_weights = attn_weights.masked_fill(mask_L0, torch.finfo(attn_weights.dtype).min)
+            final_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32)
+
+            kept_count = (~mask_L0).sum().item()
             LAYER_STATS[self.layer_idx]['total'] += valid_total
             LAYER_STATS[self.layer_idx]['kept'] += kept_count
             
-            attn_weights = attn_weights.masked_fill(SHARED_MASK, 0.0)
-            attn_weights = attn_weights / (attn_weights.sum(dim=-1, keepdim=True) + 1e-9)
         else:
+            final_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32)
             LAYER_STATS[self.layer_idx]['total'] += valid_total
             LAYER_STATS[self.layer_idx]['kept'] += valid_total
 
     else:
+        final_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32)
         LAYER_STATS[self.layer_idx]['total'] += valid_total
         LAYER_STATS[self.layer_idx]['kept'] += valid_total
 
-    attn_output = torch.matmul(attn_weights, value_states)
+    final_weights = final_weights.to(query_states.dtype)
+    attn_output = torch.matmul(final_weights, value_states)
+    
     attn_output = attn_output.transpose(1, 2).contiguous()
     attn_output = attn_output.reshape(*input_shape, -1)
     attn_output = self.o_proj(attn_output)
@@ -130,12 +140,12 @@ def custom_qwen2moe_forward(
 
 FIXED_THRESHOLD = 0.85   
 TARGET_FOLLOW_DEPTH = 0  
-SHARED_MASK = None       
+INTER_LAYER_CACHE = {"layer0_mask": None}      
 LAYER_STATS = defaultdict(lambda: {'total': 0, 'kept': 0})
 
 
 def main():
-    global TARGET_FOLLOW_DEPTH, SHARED_MASK, FIXED_THRESHOLD
+    global TARGET_FOLLOW_DEPTH, INTER_LAYER_CACHE, FIXED_THRESHOLD
     
     MODEL_PATH = "/home/ztl/.cache/huggingface/hub/models--Qwen--Qwen1.5-MoE-A2.7B-Chat/snapshots/ec052fda178e241c7c443468d2fa1db6618996be"
     DATA_PATH = "/home/ztl/wyf/ICMoE/datasets/c4_local/c4-train.00000-of-01024.json.gz"
@@ -189,7 +199,7 @@ def main():
         
         try:
             for text in tqdm(eval_texts, leave=False):
-                SHARED_MASK = None 
+                INTER_LAYER_CACHE.clear() 
                 
                 inputs = tokenizer(text, return_tensors="pt", max_length=SEQ_LEN, truncation=True).to("cuda")
                 with torch.no_grad():
