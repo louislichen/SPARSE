@@ -328,7 +328,7 @@ def main():
     
     num_gpus = torch.cuda.device_count()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"🔍 Found {num_gpus} GPUs. Running Serial Training per Layer.")
+    print(f"Found {num_gpus} GPUs. Running Serial Training per Layer.")
 
     X = load_source_data()
     
