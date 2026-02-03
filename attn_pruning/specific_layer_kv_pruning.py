@@ -1,4 +1,5 @@
 import os
+
 import torch
 import torch.nn as nn
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -70,7 +71,7 @@ def custom_qwen2moe_forward(
     key_states = repeat_kv(key_states, self.num_key_value_groups)
     value_states = repeat_kv(value_states, self.num_key_value_groups)
 
-    attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) * self.scaling
+    attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) * (head_dim ** -0.5) # self.scaling
 
     if attention_mask is not None:
         causal_mask = attention_mask[:, :, :, : key_states.shape[-2]]
@@ -84,37 +85,44 @@ def custom_qwen2moe_forward(
 
     if self.layer_idx == 0:
         probs = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32)
+        global_scores = probs.sum(dim=1) 
         
-        sorted_vals, sorted_indices = torch.sort(probs, descending=True, dim=-1)
-        cumulative_probs = torch.cumsum(sorted_vals, dim=-1)
+        mean_score = global_scores.mean(dim=-1, keepdim=True)
+        std_score = global_scores.std(dim=-1, keepdim=True)
         
-        mask_to_remove = cumulative_probs > FIXED_THRESHOLD
-        mask_to_remove[..., 0] = False # 保护第一个 token
+        z_scores = (global_scores - mean_score) / (std_score + 1e-6)
         
-        mask_L0 = torch.zeros_like(probs, dtype=torch.bool)
-        mask_L0.scatter_(dim=-1, index=sorted_indices, src=mask_to_remove)
+        keep_mask = z_scores > Z_SCORE_THRESHOLD
         
-        mask_L0_union = torch.amin(mask_L0, dim=1, keepdim=True).to(torch.bool)
-        INTER_LAYER_CACHE["layer0_mask"] = mask_L0_union.detach().clone()
+        if kv_seq_len > SINK_SIZE:
+            keep_mask[..., :SINK_SIZE] = True
+        else:
+            keep_mask[..., :] = True
+            
+        if kv_seq_len > LOCAL_WINDOW:
+            keep_mask[..., -LOCAL_WINDOW:] = True
+        else:
+            keep_mask[..., :] = True
+
+        mask_to_remove = ~keep_mask
+        mask_to_remove = mask_to_remove.unsqueeze(1) 
         
-        final_weights = probs.masked_fill(mask_L0, 0.0)
-        final_weights = final_weights / (final_weights.sum(dim=-1, keepdim=True) + 1e-9)
+        INTER_LAYER_CACHE["layer0_mask"] = mask_to_remove.detach().clone()
         
-        kept_count = (~mask_L0_union).sum().item()
-        LAYER_STATS[self.layer_idx]['total'] += valid_total
-        LAYER_STATS[self.layer_idx]['kept'] += kept_count
+        final_weights = probs
+        kept_count = keep_mask.sum().item()
 
     elif 0 < self.layer_idx <= TARGET_FOLLOW_DEPTH:
-        mask_L0 = INTER_LAYER_CACHE.get("layer0_mask")
+        mask_to_remove = INTER_LAYER_CACHE.get("layer0_mask")
         
-        if mask_L0 is not None:
-            if mask_L0.device != attn_weights.device:
-                mask_L0 = mask_L0.to(attn_weights.device)
+        if mask_to_remove is not None:
+            if mask_to_remove.device != attn_weights.device:
+                mask_to_remove = mask_to_remove.to(attn_weights.device)
             
-            attn_weights = attn_weights.masked_fill(mask_L0, torch.finfo(attn_weights.dtype).min)
+            attn_weights = attn_weights.masked_fill(mask_to_remove, torch.finfo(attn_weights.dtype).min)
             final_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32)
 
-            kept_count = (~mask_L0).sum().item()
+            kept_count = (~mask_to_remove).sum().item()
             LAYER_STATS[self.layer_idx]['total'] += valid_total
             LAYER_STATS[self.layer_idx]['kept'] += kept_count
             
@@ -138,37 +146,37 @@ def custom_qwen2moe_forward(
     return attn_output, attn_weights
 
 
-FIXED_THRESHOLD = 0.85   
 TARGET_FOLLOW_DEPTH = 0  
 INTER_LAYER_CACHE = {"layer0_mask": None}      
 LAYER_STATS = defaultdict(lambda: {'total': 0, 'kept': 0})
+Z_SCORE_THRESHOLD = 0.5 
+SINK_SIZE = 4           
+LOCAL_WINDOW = 32
 
 
 def main():
-    global TARGET_FOLLOW_DEPTH, INTER_LAYER_CACHE, FIXED_THRESHOLD
+    global TARGET_FOLLOW_DEPTH, INTER_LAYER_CACHE, Z_SCORE_THRESHOLD, SINK_SIZE, LOCAL_WINDOW
     
-    MODEL_PATH = "/home/ztl/.cache/huggingface/hub/models--Qwen--Qwen1.5-MoE-A2.7B-Chat/snapshots/ec052fda178e241c7c443468d2fa1db6618996be"
-    DATA_PATH = "/home/ztl/wyf/ICMoE/datasets/c4_local/c4-train.00000-of-01024.json.gz"
-    SAVE_DIR = "/home/ztl/cl/LLM_Partition/results/specific_layer_kv_pruning"
+    MODEL_PATH = "/data1/cl/models/Qwen1.5-MoE-A2.7B-Chat"
+    DATA_PATH = "/data1/cl/Dataset/c4/c4-train.00000-of-01024.json.gz"
+    SAVE_DIR = "/data1/cl/SPARSE/results/specific_layer_kv_pruning"
     os.makedirs(SAVE_DIR, exist_ok=True)
 
     SEQ_LEN = 1024  
     NUM_SAMPLES = 100
 
-    DEPTH_EXPERIMENTS = [0, 1, 2, 3, 4]
-
     print("Loading Model...")
     tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=True)
 
-    MEMORY_MAP = {0: "9GiB", 1: "9GiB", 2: "9GiB", 3: "9GiB", "cpu": "80GiB"}
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_PATH, 
         device_map="auto", 
-        max_memory=MEMORY_MAP, 
         torch_dtype=torch.float16, 
         attn_implementation="eager", 
         trust_remote_code=True
     )
+
+    DEPTH_EXPERIMENTS = list(range(model.config.num_hidden_layers))
 
     for layer in model.model.layers:
         layer.self_attn.forward = types.MethodType(custom_qwen2moe_forward, layer.self_attn)
@@ -244,7 +252,7 @@ def main():
         ax2.plot(df["Follow_Depth"], df["Global_Savings"]*100, marker='s', linestyle='--', color='tab:blue', label="Savings")
         ax2.tick_params(axis='y', labelcolor='tab:blue')
         
-        plt.title(f"Consistency Check: Propagating Layer 0 Mask (Threshold={FIXED_THRESHOLD})\nEffect on PPL vs # of Layers Forced")
+        plt.title(f"Consistency Check: Propagating Layer 0 Mask\nEffect on PPL vs # of Layers Forced")
         plt.tight_layout()
         plt.savefig(os.path.join(SAVE_DIR, "consistency_tradeoff.png"))
         print(f"Done. Saved to {SAVE_DIR}")
