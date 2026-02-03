@@ -68,22 +68,21 @@ def custom_qwen2moe_forward(
     key_states = repeat_kv(key_states, self.num_key_value_groups)
     value_states = repeat_kv(value_states, self.num_key_value_groups)
 
-    attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) * self.scaling
+    attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) * (head_dim ** -0.5) # self.scaling
 
     if attention_mask is not None:
         causal_mask = attention_mask[:, :, :, : key_states.shape[-2]]
         attn_weights = attn_weights + causal_mask
 
-    attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
-
     kv_seq_len = key_states.shape[-2]
     if q_len == kv_seq_len:
-        valid_total = bsz * num_heads * (q_len * (q_len + 1)) // 2
+        valid_total = bsz * (q_len * (q_len + 1)) // 2
     else:
-        valid_total = attn_weights.numel()
+        valid_total = attn_weights.numel() // num_heads
 
     if CURRENT_THRESHOLD < 1.0:
-        probs = attn_weights.float()
+        probs = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32)
+
         sorted_vals, sorted_indices = torch.sort(probs, descending=True, dim=-1)
         cumulative_probs = torch.cumsum(sorted_vals, dim=-1)
 
@@ -93,17 +92,21 @@ def custom_qwen2moe_forward(
         final_mask = torch.zeros_like(probs, dtype=torch.bool)
         final_mask.scatter_(dim=-1, index=sorted_indices, src=mask_to_remove)
 
-        kept_count = (~final_mask).sum().item()
+        union_mask_to_remove = final_mask.all(dim=1, keepdim=True)
+        real_kept_tokens = (~union_mask_to_remove).sum().item()
+        kept_count = real_kept_tokens
+
         LAYER_STATS[self.layer_idx]['total'] += valid_total
         LAYER_STATS[self.layer_idx]['kept'] += kept_count
 
-        attn_weights = attn_weights.masked_fill(final_mask, 0.0)
-        
-        attn_weights = attn_weights / (attn_weights.sum(dim=-1, keepdim=True) + 1e-9)
+        attn_weights = attn_weights.masked_fill(union_mask_to_remove, torch.finfo(attn_weights.dtype).min)
+        attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32)
     else:
         LAYER_STATS[self.layer_idx]['total'] += valid_total
         LAYER_STATS[self.layer_idx]['kept'] += valid_total
+        attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32)
 
+    attn_weights = attn_weights.to(value_states.dtype)
     attn_output = torch.matmul(attn_weights, value_states)
     attn_output = attn_output.transpose(1, 2).contiguous()
     attn_output = attn_output.reshape(*input_shape, -1)
@@ -118,9 +121,9 @@ LAYER_STATS = defaultdict(lambda: {'total': 0, 'kept': 0})
 def main():
     global CURRENT_THRESHOLD
     
-    MODEL_PATH = "/home/ztl/.cache/huggingface/hub/models--Qwen--Qwen1.5-MoE-A2.7B-Chat/snapshots/ec052fda178e241c7c443468d2fa1db6618996be"
-    DATA_PATH = "/home/ztl/wyf/ICMoE/datasets/c4_local/c4-train.00000-of-01024.json.gz"
-    SAVE_DIR = "/home/ztl/cl/LLM_Partition/results/dynamic_kv_pruning"
+    MODEL_PATH = "/data1/cl/models/Qwen1.5-MoE-A2.7B-Chat"
+    DATA_PATH = "/data1/cl/Dataset/c4/c4-train.00000-of-01024.json.gz"
+    SAVE_DIR = "/data1/cl/SPARSE/results/dynamic_kv_pruning"
     os.makedirs(SAVE_DIR, exist_ok=True)
 
     SEQ_LEN = 1024  
