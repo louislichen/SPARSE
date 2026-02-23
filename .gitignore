@@ -1,2 +1,9 @@
 **.pth
 **.pt
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+SPARSE_Frame/scripts/check_data.py
+SPARSE_Frame/scripts/test.py
+SPARSE_Frame/modules/
