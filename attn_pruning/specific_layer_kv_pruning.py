@@ -13,6 +13,7 @@ import types
 import gc
 from collections import defaultdict
 
+# kv pruning based on specific_layer(layer0) Attention distribution
 
 def custom_qwen2moe_forward(
     self,
