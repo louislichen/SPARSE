@@ -72,7 +72,8 @@ class RoutingScoutMLP(nn.Module):
             nn.BatchNorm1d(hidden_dim),
             nn.ReLU(),
             nn.Dropout(0.1),
-            nn.Linear(hidden_dim, num_experts)
+            nn.Linear(hidden_dim, num_experts),
+            nn.Softmax(dim=-1)
         )
     def forward(self, x):
         if len(x.shape) == 3: 
@@ -119,6 +120,8 @@ class SparseDistributedMoELayer(nn.Module):
                     self.all_rs_models[l].load_state_dict(torch.load(rs_path, map_location=self.device))
             self.all_rs_models.eval()
 
+        if not isinstance(hf_experts_list, list) :
+            hf_experts_list = [] 
         self.expert_to_node = torch.zeros(self.num_experts, dtype=torch.long, device=self.device)
         self.local_expert_ids = []
         
@@ -134,7 +137,15 @@ class SparseDistributedMoELayer(nn.Module):
         for eid in range(self.num_experts):
             if eid in self.local_expert_ids:
                 self.local_experts[str(eid)] = SlicedExpert(hf_experts_list[eid], self.device)
-            hf_experts_list[eid] = None 
+                # print debug info about the expert assignment
+                # print(f"Layer {layer_idx}: hf_experts_list length = {len(hf_experts_list)}, num_experts = {self.num_experts}")
+            # else:
+            #     if hf_experts_list[eid] is not None:
+            #         del hf_experts_list[eid]
+            #         hf_experts_list[eid] = None
+            # if 'hf_experts_list' in locals():
+        hf_experts_list.clear()  # Clear the list to free memory
+            # del hf_experts_list
 
     def forward(self, hidden_states):
         original_shape = hidden_states.shape
@@ -219,6 +230,7 @@ def get_dynamic_config(model_path):
     return config, num_layers, hidden_size, num_experts, top_k, expert_attr_name
 
 def get_experts_from_layer(layer, attr_name):
+    # print(f"Looking for experts in layer {layer} with attribute {attr_name}")
     obj = layer
     for attr in attr_name.split('.'):
         if hasattr(obj, attr): 
@@ -266,8 +278,13 @@ def main():
         layer.self_attn.forward = types.MethodType(custom_skvs_attention_forward, layer.self_attn)
         
         hf_experts_module = get_experts_from_layer(layer, expert_attr_name)
+        # hf_experts_list = []
+        # shared_expert = None
+        # shared_expert_gate = None
         if hf_experts_module is not None:
-            hf_experts_list = [expert for expert in hf_experts_module]
+            # hf_experts_list = [expert for expert in hf_experts_module]
+            hf_experts_list = list(hf_experts_module)
+            num_experts = len(hf_experts_list)
             shared_expert = getattr(layer.mlp, 'shared_expert', None)
             shared_expert_gate = getattr(layer.mlp, 'shared_expert_gate', None)
 
