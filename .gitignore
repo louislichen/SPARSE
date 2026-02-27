@@ -7,3 +7,4 @@ __pycache__/
 SPARSE_Frame/scripts/check_data.py
 SPARSE_Frame/scripts/test.py
 SPARSE_Frame/modules/
+SPARSE_gpt/
