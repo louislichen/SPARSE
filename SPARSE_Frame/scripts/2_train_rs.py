@@ -10,16 +10,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 import re
 from torch.utils.data import TensorDataset, DataLoader, random_split
-
+import torch.nn.functional as F
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
-DATA_DIR = "/home/ztl/wyf/SPARSE_MOE/results/profile_data"
-OUTPUT_DIR = "/home/ztl/wyf/SPARSE_MOE/results/mlp_trainer"
+DATA_DIR = "/home/ztl/wyf/SPARSE/SPARSE_Frame/results/profile_data/Qwen1.5MoE/rs_chunks"
+OUTPUT_DIR = "/home/ztl/wyf/SPARSE_MOE/results/mlp_trainer/Qwen1.5MoE"
 
-PER_GPU_BATCH_SIZE = 1024       
+PER_GPU_BATCH_SIZE = 2048       
 GRADIENT_ACCUM_STEPS = 1    
 EPOCHS = 100                     
 LEARNING_RATE = 1e-3         
@@ -44,8 +44,7 @@ class LayerIndependentMLP(nn.Module):
             nn.BatchNorm1d(hidden_dim),
             nn.ReLU(),
             nn.Dropout(0.1),
-            nn.Linear(hidden_dim, num_experts),
-            nn.Softmax(dim=-1)
+            nn.Linear(hidden_dim, num_experts)
         )
     
     def forward(self, x):
@@ -58,11 +57,14 @@ class RelativeWeightedMSE(nn.Module):
         super().__init__()
         self.tail_epsilon = tail_epsilon
 
-    def forward(self, pred, target):
-        max_values, _ = target.max(dim=1, keepdim=True)
-        loss_weights = target / (max_values + 1e-8) 
+    def forward(self, pred_logits, target_logits):
+        pred_probs = F.softmax(pred_logits, dim=-1)
+        target_probs = F.softmax(target_logits, dim=-1)
+        
+        max_values, _ = target_probs.max(dim=1, keepdim=True)
+        loss_weights = target_probs / (max_values + 1e-8) 
         weights = loss_weights + self.tail_epsilon
-        squared_diff = (pred - target) ** 2
+        squared_diff = (pred_probs - target_probs) ** 2
         loss = (weights.detach() * squared_diff).sum(dim=1).mean()
         return loss
 

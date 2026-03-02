@@ -1,0 +1,42 @@
+[
+    {
+        "timestamp": "2026-03-02 07:18:44",
+        "routing_mode": "router",
+        "task": "ppl",
+        "run_tag": "test_cpu_cache1",
+        "model_path": "/home/ztl/.cache/huggingface/hub/models--Qwen--Qwen1.5-MoE-A2.7B/snapshots/1a758c50ecb6350748b9ce0a99d2352fd9fc11c9",
+        "dataset": "/home/ztl/wyf/ICMoE/datasets/c4_local/c4-train.00000-of-01024.json.gz",
+        "max_len": 2048,
+        "batch_size": 1,
+        "sample_size": 32,
+        "tok_sum": 13639,
+        "num_valid_samples": 32,
+        "nll_per_tok": 2.391388,
+        "ppl_tok": 10.928653,
+        "nll_per_sample": 2.526392,
+        "ppl_sample": 12.50829,
+        "wall_time_seconds": 12.85,
+        "expert_offload": "cpu",
+        "dtype": "float16"
+    },
+    {
+        "timestamp": "2026-03-02 07:22:17",
+        "routing_mode": "rs",
+        "task": "ppl",
+        "run_tag": "test_cpu_cache1",
+        "model_path": "/home/ztl/.cache/huggingface/hub/models--Qwen--Qwen1.5-MoE-A2.7B/snapshots/1a758c50ecb6350748b9ce0a99d2352fd9fc11c9",
+        "dataset": "/home/ztl/wyf/ICMoE/datasets/c4_local/c4-train.00000-of-01024.json.gz",
+        "max_len": 2048,
+        "batch_size": 1,
+        "sample_size": 32,
+        "tok_sum": 13639,
+        "num_valid_samples": 32,
+        "nll_per_tok": 4.043777,
+        "ppl_tok": 57.041381,
+        "nll_per_sample": 3.994643,
+        "ppl_sample": 54.306475,
+        "wall_time_seconds": 12.91,
+        "expert_offload": "cpu",
+        "dtype": "float16"
+    }
+]

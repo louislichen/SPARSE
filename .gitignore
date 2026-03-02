@@ -4,7 +4,8 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
-SPARSE_Frame/scripts/check_data.py
-SPARSE_Frame/scripts/test.py
+SPARSE_Frame/scripts/check_profile_data.py
+SPARSE_Frame/scripts/prob_data.py
+SPARSE_Frame/scripts/singleGPU_base.py
 SPARSE_Frame/modules/
 SPARSE_gpt/
