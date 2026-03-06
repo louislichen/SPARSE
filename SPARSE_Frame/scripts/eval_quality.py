@@ -177,7 +177,7 @@ def main() -> None:
 
     ap.add_argument("--model-path", type=str, default="/home/ztl/.cache/huggingface/hub/models--Qwen--Qwen1.5-MoE-A2.7B/snapshots/1a758c50ecb6350748b9ce0a99d2352fd9fc11c9")
     ap.add_argument("--scp-path", type=str, default="/home/ztl/wyf/SPARSE/SPARSE_Frame/results/scp_placement.json")
-    ap.add_argument("--rs-dir", type=str, default="/home/ztl/wyf/SPARSE/SPARSE_Frame/results/mlp_trainer")
+    ap.add_argument("--rs-dir", type=str, default="/home/ztl/wyf/SPARSE/SPARSE_Frame/results/mlp_trainer/Qwen1.5MoE_allData")
 
     ap.add_argument("--dtype", type=str, default="float16", choices=["float16", "bfloat16"])
     ap.add_argument("--expert-offload", type=str, default="cpu", choices=["cpu", "gpu"])
@@ -195,7 +195,7 @@ def main() -> None:
 
     ap.add_argument("--task", type=str, choices=["ppl"], required=True)
     ap.add_argument("--dataset", type=str, default="/home/ztl/wyf/ICMoE/datasets/c4_local/c4-train.00000-of-01024.json.gz")
-    ap.add_argument("--max-len", type=int, default=1024)
+    ap.add_argument("--max-len", type=int, default=512)
     ap.add_argument("--batch", type=int, default=1)
     ap.add_argument("--sample-size", type=int, default=128)
 
@@ -205,6 +205,8 @@ def main() -> None:
     ap.add_argument("--sdpa-flash", action="store_true")
     ap.add_argument("--sdpa-mem-efficient", action="store_true")
     ap.add_argument("--sdpa-math", action="store_true")
+    ap.add_argument("--rs-group", type=int, default=3)
+    ap.add_argument("--rs-debug", action="store_true")
     args = ap.parse_args()
 
     os.environ.setdefault("PYTORCH_ALLOC_CONF", "expandable_segments:True")
@@ -231,6 +233,8 @@ def main() -> None:
         rs_require_complete=bool(args.rs_require_complete),
         rs_prob_to_logit_eps=1e-9,
         log_routing_stats=bool(args.log_routing_stats),
+        rs_group=args.rs_group,
+        rs_debug=bool(args.rs_debug),
     )
 
     bundle = build_model_and_tokenizer(cfg, env, metrics=None)

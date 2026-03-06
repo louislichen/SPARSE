@@ -28,10 +28,10 @@ def main():
     ap = argparse.ArgumentParser(description="Profile MoE model for RS & SCP data collection")
     ap.add_argument("--model-path", type=str, default="/home/ztl/.cache/huggingface/hub/models--Qwen--Qwen1.5-MoE-A2.7B/snapshots/1a758c50ecb6350748b9ce0a99d2352fd9fc11c9")
     ap.add_argument("--dataset", type=str, default="/home/ztl/wyf/ICMoE/datasets/c4_local/c4-train.00000-of-01024.json.gz")
-    ap.add_argument("--base-dir", type=str, default="/home/ztl/wyf/SPARSE/SPARSE_Frame/results/profile_data/Qwen1.5MoE")
-    ap.add_argument("--num-samples", type=int, default=10000)
-    ap.add_argument("--max-seq-len", type=int, default=1024)
-    ap.add_argument("--save-interval", type=int, default=5000)
+    ap.add_argument("--base-dir", type=str, default="/home/ztl/wyf/SPARSE/SPARSE_Frame/results/profile_data/Qwen1.5MoE_allData")
+    ap.add_argument("--num-samples", type=int, default=8000)
+    ap.add_argument("--max-seq-len", type=int, default=512)
+    ap.add_argument("--save-interval", type=int, default=4000)
     args = ap.parse_args()
 
     MODEL_PATH = args.model_path       
@@ -72,7 +72,9 @@ def main():
     
     print(f"Model Config: {num_layers} Layers, {num_experts_per_layer} Experts/Layer, Top-{top_k}, Hidden Size: {hidden_size}")
     
-    rs_inputs_l0 = []  # Layer 0 Post-attention hidden-state
+    # rs_inputs_l0 = []  # Layer 0 Post-attention hidden-state
+    rs_inputs = {i: [] for i in range(num_layers)}  # 改为字典，存储每层的post-attention输入
+
     rs_labels = {i: {"logits": [], "indices": [], "weights": []} for i in range(num_layers)}
     total_experts = num_layers * num_experts_per_layer
     global_co_act_matrix = torch.zeros(total_experts, total_experts, dtype=torch.float32)
@@ -97,12 +99,12 @@ def main():
                 
                 # ========== 1. 收集Post-attention hidden-state（Layer 0） ==========
                 batch_size, seq_len, _ = args[0].shape
-                if layer_idx == 0:
-                    post_attn_hidden = args[0].reshape(-1, hidden_size).detach().cpu().half()
-                    rs_inputs_l0.append(post_attn_hidden)
-                    if len(rs_inputs_l0) == 1:
-                        print(f"\nLayer 0 Post-attention hidden-state形状: {args[0].shape}")
-                        print(f"Layer 0 Router logits形状: {router_logits.shape}")
+                
+                post_attn_hidden = args[0].reshape(-1, hidden_size).detach().cpu().half()
+                rs_inputs[layer_idx].append(post_attn_hidden)
+                if layer_idx == 0 and len(rs_inputs[layer_idx]) == 1:
+                    print(f"\nLayer 0 Post-attention hidden-state形状: {args[0].shape}")
+                    print(f"Layer 0 Router logits形状: {router_logits.shape}")
                 
                 # ========== 2. 计算选中专家的索引和权重（和源码一致） ==========
                 # router_logits形状：[Batch*SeqLen, num_experts]
@@ -202,9 +204,10 @@ def main():
                         # 更新共活矩阵
                         _update_co_act_matrix(global_co_act_matrix, rs_labels, num_experts_per_layer, num_layers, top_k)
                         # 保存分块数据
-                        _save_chunk(count, rs_inputs_l0, rs_labels, DATA_SAVE_DIR)  
+                        _save_chunk(count, rs_inputs, rs_labels, DATA_SAVE_DIR)  
                     
-                    rs_inputs_l0.clear()
+                    for layer_idx in rs_inputs:
+                        rs_inputs[layer_idx].clear()
                     for k in rs_labels: 
                         rs_labels[k]["logits"].clear()
                         rs_labels[k]["indices"].clear()
@@ -221,7 +224,7 @@ def main():
 
     if buffer_steps > 0 and len(rs_labels[0]["indices"]) > 0:
         _update_co_act_matrix(global_co_act_matrix, rs_labels, num_experts_per_layer, num_layers, top_k)
-        _save_chunk(count, rs_inputs_l0, rs_labels, DATA_SAVE_DIR) 
+        _save_chunk(count, rs_inputs, rs_labels, DATA_SAVE_DIR) 
     
     non_zeros = torch.count_nonzero(global_co_act_matrix).item()
     print(f"\nGlobal Co-activation Matrix Stats:")
@@ -286,20 +289,23 @@ def _update_co_act_matrix(matrix, labels_dict, experts_per_layer, num_layers, to
 
 
 def _save_chunk(step_idx, inputs, labels_dict, data_save_dir):
-    """保存分块数据，包含Post-attention hidden-state、logits、选中专家索引"""
+    """保存分块数据，包含所有层Post-attention hidden-state、logits、选中专家索引"""
     try:
-        # 1. 保存Layer 0 Post-attention hidden-state
-        if len(inputs) > 0:
-            inputs_cat = torch.cat(inputs, dim=0)
-            chunk_path = os.path.join(data_save_dir, f"rs_inputs_l0_chunk_{step_idx}.pt")  
+        # 1. 保存所有Layer的Post-attention hidden-state（修改：遍历所有层）
+        # 原代码：if len(inputs) > 0:
+        for layer_idx in inputs:
+            layer_inputs = inputs[layer_idx]
+            if len(layer_inputs) == 0:
+                continue
+            inputs_cat = torch.cat(layer_inputs, dim=0)
+            chunk_path = os.path.join(data_save_dir, f"rs_inputs_l{layer_idx}_chunk_{step_idx}.pt")  
             torch.save(inputs_cat, chunk_path)
-            print(f" - Saved Layer 0 inputs: {chunk_path} (shape: {inputs_cat.shape})")
+            print(f" - Saved Layer {layer_idx} inputs: {chunk_path} (shape: {inputs_cat.shape})")
         
-        # 2. 保存每层的Logits和选中专家索引
+        # 2. 保存每层的Logits和选中专家索引（原有逻辑不变）
         for layer_idx, data in labels_dict.items():
             if len(data["logits"]) == 0:
                 continue
-            # 拼接数据
             logits_cat = torch.cat(data["logits"], dim=0)
             indices_cat = torch.cat(data["indices"], dim=0)
             weights_cat = torch.cat(data["weights"], dim=0)

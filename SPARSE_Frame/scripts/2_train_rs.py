@@ -3,368 +3,463 @@ import os
 import glob
 import csv
 import gc
+import re
+import argparse
+from typing import Dict, Tuple, Optional, List
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as F
+
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data import TensorDataset, DataLoader, random_split
+from torch.utils.data.distributed import DistributedSampler
+
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-import re
-from torch.utils.data import TensorDataset, DataLoader, random_split
-import torch.nn.functional as F
+
+
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
-DATA_DIR = "/home/ztl/wyf/SPARSE/SPARSE_Frame/results/profile_data/Qwen1.5MoE/rs_chunks"
-OUTPUT_DIR = "/home/ztl/wyf/SPARSE_MOE/results/mlp_trainer/Qwen1.5MoE"
 
-PER_GPU_BATCH_SIZE = 2048       
-GRADIENT_ACCUM_STEPS = 1    
-EPOCHS = 100                     
-LEARNING_RATE = 1e-3         
-WEIGHT_DECAY = 1e-4
-TOP_K_LIST = [2, 3, 4]
-EARLY_STOP_PATIENCE = 10  
-
-NUM_WORKERS = 4    
-PIN_MEMORY = True 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0" 
-
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-os.makedirs(os.path.join(OUTPUT_DIR, "plots"), exist_ok=True)
-
-
-# ================= 模型定义 =================
 class LayerIndependentMLP(nn.Module):
-    def __init__(self, input_dim, num_experts, hidden_dim=1024):
+    def __init__(self, input_dim: int, num_experts: int, hidden_dim: int = 1024):
         super().__init__()
         self.mlp = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.BatchNorm1d(hidden_dim),
             nn.ReLU(),
             nn.Dropout(0.1),
-            nn.Linear(hidden_dim, num_experts)
+            nn.Linear(hidden_dim, num_experts),
         )
-    
-    def forward(self, x):
-        if len(x.shape) == 3:
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.dim() == 3:
             x = x.view(-1, x.shape[-1])
         return self.mlp(x)
 
+
 class RelativeWeightedMSE(nn.Module):
-    def __init__(self, tail_epsilon=0.01):
+    def __init__(self, tail_epsilon: float = 0.01):
         super().__init__()
         self.tail_epsilon = tail_epsilon
 
-    def forward(self, pred_logits, target_logits):
+    def forward(self, pred_logits: torch.Tensor, target_logits: torch.Tensor) -> torch.Tensor:
         pred_probs = F.softmax(pred_logits, dim=-1)
         target_probs = F.softmax(target_logits, dim=-1)
-        
         max_values, _ = target_probs.max(dim=1, keepdim=True)
-        loss_weights = target_probs / (max_values + 1e-8) 
+        loss_weights = target_probs / (max_values + 1e-8)
         weights = loss_weights + self.tail_epsilon
         squared_diff = (pred_probs - target_probs) ** 2
-        loss = (weights.detach() * squared_diff).sum(dim=1).mean()
-        return loss
+        return (weights.detach() * squared_diff).sum(dim=1).mean()
 
-# ================= Metrics =================
-def compute_recall_at_ks(pred_logits, true_indices, ks=TOP_K_LIST):
-    _, pred_top4_indices = torch.topk(pred_logits, 4, dim=-1)
-    recall_results = {}
+
+def compute_recall_at_ks(pred_logits: torch.Tensor, true_indices: torch.Tensor, ks: List[int]) -> Dict[int, float]:
+    kmax = max(ks)
+    _, pred_topk = torch.topk(pred_logits, kmax, dim=-1)
+    out = {}
     for k in ks:
-        true_topk_indices = true_indices[:, :k]
-        pred_expanded = pred_top4_indices.unsqueeze(2)
-        true_expanded = true_topk_indices.unsqueeze(1)
-        matches = (pred_expanded == true_expanded)
+        true_topk = true_indices[:, :k]
+        pred_k = pred_topk[:, :k]
+        matches = (pred_k.unsqueeze(2) == true_topk.unsqueeze(1))
         num_correct = matches.any(dim=2).sum(dim=1).float()
-        avg_recall = torch.mean(num_correct / k).item()
-        recall_results[k] = avg_recall
-    return recall_results
+        out[k] = torch.mean(num_correct / k).item()
+    return out
 
-def compute_regression_metrics(pred_logits, true_logits):
+
+def compute_regression_metrics(pred_logits: torch.Tensor, true_logits: torch.Tensor) -> Tuple[float, float]:
     mse = nn.functional.mse_loss(pred_logits, true_logits).item()
     mae = nn.functional.l1_loss(pred_logits, true_logits).item()
     return mse, mae
+
 
 def release_gpu_memory():
     torch.cuda.empty_cache()
     gc.collect()
 
-# ================= 数据加载辅助函数 =================
-def get_sorted_files(pattern):
-    """
-    获取匹配的文件并按 Chunk ID 排序 (4999 < 9999)
-    """
+
+def get_sorted_files(pattern: str) -> List[str]:
     files = glob.glob(pattern)
-    if not files: return []
-    
-    def extract_step(filename):
-        match = re.search(r'_chunk_(\d+)\.pt$', filename)
-        return int(match.group(1)) if match else -1
-        
+    if not files:
+        return []
+
+    def extract_step(fn: str) -> int:
+        m = re.search(r"_chunk_(\d+)\.pt$", fn)
+        return int(m.group(1)) if m else -1
+
     return sorted(files, key=extract_step)
 
-def load_source_data_chunks():
-    """加载 Layer 0 的 Input (所有 chunks)"""
-    print(f"Loading Source Inputs (Layer 0)...")
-    pattern = os.path.join(DATA_DIR, "rs_inputs_l0_chunk_*.pt")
-    files = get_sorted_files(pattern)
-    
-    if not files:
-        raise FileNotFoundError(f"No input chunks found in {DATA_DIR}!")
-    
-    tensors = []
-    for f in files:
-        try:
-            t = torch.load(f, map_location="cpu")
-            tensors.append(t.float())
-        except Exception as e:
-            print(f"Warning: Error loading {f}: {e}")
-            
-    if not tensors: return None
-    return torch.cat(tensors, dim=0)
 
-def load_target_data_chunks(layer_idx):
-    """加载指定 Layer 的 Labels (所有 chunks)"""
-    pattern = os.path.join(DATA_DIR, f"rs_labels_l{layer_idx}_chunk_*.pt")
-    files = get_sorted_files(pattern)
-    
-    if not files:
-        return None, None
-    
-    logits_list = []
-    indices_list = []
-    
-    for f in files:
-        try:
-            d = torch.load(f, map_location="cpu")
-            logits_list.append(d['logits'].float())
-            indices_list.append(d['indices'].long())
-        except Exception as e:
-            print(f"Warning: Error loading {f}: {e}")
-            
-    if not logits_list: return None, None
-    
-    return torch.cat(logits_list, dim=0), torch.cat(indices_list, dim=0)
+def ddp_is_initialized() -> bool:
+    return dist.is_available() and dist.is_initialized()
 
-# ================= 训练流程 =================
-def train_single_layer(layer_idx, X, device, num_gpus):
-    print(f"\n{'='*10} Processing Layer {layer_idx} {'='*10}")
-    
-    Y_logits, Y_indices = load_target_data_chunks(layer_idx)
-    if Y_logits is None:
-        print(f"Layer {layer_idx} data missing, skip...")
+
+def ddp_rank() -> int:
+    return dist.get_rank() if ddp_is_initialized() else 0
+
+
+def ddp_world_size() -> int:
+    return dist.get_world_size() if ddp_is_initialized() else 1
+
+
+def ddp_barrier():
+    if ddp_is_initialized():
+        dist.barrier()
+
+
+def all_reduce_sum(value: float, device: torch.device) -> float:
+    t = torch.tensor([value], dtype=torch.float32, device=device)
+    dist.all_reduce(t, op=dist.ReduceOp.SUM)
+    return t.item()
+
+
+def all_reduce_mean(value: float, device: torch.device) -> float:
+    return all_reduce_sum(value, device) / ddp_world_size()
+
+
+def ddp_all_true(flag: bool, device: torch.device) -> bool:
+    t = torch.tensor([1 if flag else 0], dtype=torch.int32, device=device)
+    dist.all_reduce(t, op=dist.ReduceOp.MIN)
+    return bool(t.item())
+
+
+def shard_files_nonempty(files, rank, world_size):
+    n = len(files)
+    if n == 0:
+        return []
+    if n >= world_size:
+        return [f for i, f in enumerate(files) if (i % world_size) == rank]
+    # n < world_size：复制分配，避免 rank2/3 没数据
+    return [files[rank % n]]
+
+
+def load_source_data_chunks_sharded(data_dir: str, layer_idx: int, rank: int, world_size: int, fp32: bool) -> Optional[torch.Tensor]:
+    pattern = os.path.join(data_dir, f"rs_inputs_l{layer_idx}_chunk_*.pt")
+    files = get_sorted_files(pattern)
+    if not files:
+        return None
+    files = shard_files_nonempty(files, rank, world_size)
+    if not files:
         return None
 
-    min_len = min(len(X), len(Y_logits))
-    X_curr = X[:min_len]
+    tensors = []
+    for f in files:
+        t = torch.load(f, map_location="cpu")  # tensor
+        # 尽量保持 fp16 降低 CPU 内存
+        tensors.append(t.float() if fp32 else t.half())
+    return torch.cat(tensors, dim=0)
+
+
+def load_target_data_chunks_sharded(data_dir: str, layer_idx: int, rank: int, world_size: int, fp32: bool) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
+    pattern = os.path.join(data_dir, f"rs_labels_l{layer_idx}_chunk_*.pt")
+    files = get_sorted_files(pattern)
+    if not files:
+        return None, None
+    files = shard_files_nonempty(files, rank, world_size)
+    if not files:
+        return None, None
+
+    logits_list, indices_list = [], []
+    for f in files:
+        d = torch.load(f, map_location="cpu")
+        logits = d["logits"]
+        idx = d["indices"]
+        logits_list.append(logits.float() if fp32 else logits.half())
+        indices_list.append(idx.long())
+    return torch.cat(logits_list, dim=0), torch.cat(indices_list, dim=0)
+
+
+def setup_ddp():
+    dist.init_process_group(backend="nccl")
+    local_rank = int(os.environ["LOCAL_RANK"])
+    rank = int(os.environ["RANK"])
+    world_size = int(os.environ["WORLD_SIZE"])
+    torch.cuda.set_device(local_rank)
+    return local_rank, rank, world_size
+
+
+def train_single_layer(layer_idx: int, X_source: torch.Tensor, source_layer: int, device: torch.device, args):
+    rank = ddp_rank()
+    world_size = ddp_world_size()
+    is_main = (rank == 0)
+
+    # 读取 labels（分片）
+    Y_logits, Y_indices = load_target_data_chunks_sharded(args.data_dir, layer_idx, rank, world_size, fp32=args.cpu_fp32)
+    has_y = (Y_logits is not None) and (Y_indices is not None)
+    ok = ddp_all_true(has_y, device)
+    if not ok:
+        if is_main:
+            print(f"[Skip-All] layer {layer_idx}: some rank failed to load labels")
+        ddp_barrier()
+        return None, None
+
+    min_len = min(len(X_source), len(Y_logits))
+    X_curr = X_source[:min_len]
     Y_logits = Y_logits[:min_len]
     Y_indices = Y_indices[:min_len]
 
     input_dim = X_curr.shape[1]
-    num_experts = Y_logits.shape[1] 
-    print(f"Data Loaded: {min_len} samples | Input Dim: {input_dim} | Experts: {num_experts}")
+    num_experts = Y_logits.shape[1]
+
+    if is_main:
+        print(f"\n========== Train layer {layer_idx} (input L{source_layer}) ==========")
+        print(f"Per-rank tokens: {min_len} | H={input_dim} | E={num_experts}")
 
     dataset = TensorDataset(X_curr, Y_logits, Y_indices)
-    
     train_sz = int(0.7 * len(dataset))
     val_sz = int(0.1 * len(dataset))
     test_sz = len(dataset) - train_sz - val_sz
-    
-    train_ds, val_ds, test_ds = random_split(
-        dataset, [train_sz, val_sz, test_sz], 
-        generator=torch.Generator().manual_seed(42)
-    )
 
-    total_batch_size = PER_GPU_BATCH_SIZE * num_gpus * GRADIENT_ACCUM_STEPS
-    
-    train_loader = DataLoader(train_ds, batch_size=total_batch_size, shuffle=True, num_workers=NUM_WORKERS, pin_memory=PIN_MEMORY, drop_last=True)
-    val_loader = DataLoader(val_ds, batch_size=total_batch_size, shuffle=False, num_workers=NUM_WORKERS, pin_memory=PIN_MEMORY)
-    test_loader = DataLoader(test_ds, batch_size=total_batch_size, shuffle=False, num_workers=NUM_WORKERS, pin_memory=PIN_MEMORY)
+    g = torch.Generator().manual_seed(42)
+    train_ds, val_ds, test_ds = random_split(dataset, [train_sz, val_sz, test_sz], generator=g)
+
+    train_sampler = DistributedSampler(train_ds, num_replicas=world_size, rank=rank, shuffle=True, drop_last=True)
+    val_sampler = DistributedSampler(val_ds, num_replicas=world_size, rank=rank, shuffle=False, drop_last=False)
+    test_sampler = DistributedSampler(test_ds, num_replicas=world_size, rank=rank, shuffle=False, drop_last=False)
+
+    train_loader = DataLoader(train_ds, batch_size=args.per_gpu_batch_size, sampler=train_sampler,
+                              num_workers=args.num_workers, pin_memory=args.pin_memory, drop_last=True)
+    val_loader = DataLoader(val_ds, batch_size=args.per_gpu_batch_size, sampler=val_sampler,
+                            num_workers=args.num_workers, pin_memory=args.pin_memory, drop_last=False)
+    test_loader = DataLoader(test_ds, batch_size=args.per_gpu_batch_size, sampler=test_sampler,
+                             num_workers=args.num_workers, pin_memory=args.pin_memory, drop_last=False)
 
     model = LayerIndependentMLP(input_dim, num_experts, hidden_dim=1024).to(device)
-    if num_gpus > 1:
-        model = nn.DataParallel(model)
+    model = DDP(model, device_ids=[device.index], output_device=device.index, find_unused_parameters=False)
 
-    optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
-    criterion = RelativeWeightedMSE(tail_epsilon=0.01).to(device)
+    optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    lr_patience = max(1, args.early_stop_patience // 2)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=lr_patience)
+    criterion = RelativeWeightedMSE(tail_epsilon=args.tail_epsilon).to(device)
 
-    best_val_loss = float('inf')
+    save_path = os.path.join(args.output_dir, f"rs_l{layer_idx}_inL{source_layer}.pth")
+
+    best_val = float("inf")
     early_stop_cnt = 0
     history = {"train_loss": [], "val_loss": []}
-    
-    print(f"Start Training Layer {layer_idx}...")
-    
-    for epoch in range(EPOCHS):
+
+    for epoch in range(args.epochs):
+        train_sampler.set_epoch(epoch)
+
         model.train()
-        train_loss = 0.0
+        tr_sum, tr_n = 0.0, 0
         for bx, by_logits, _ in train_loader:
-            bx, by_logits = bx.to(device, non_blocking=True), by_logits.to(device, non_blocking=True)
-            
-            optimizer.zero_grad()
+            bx = bx.to(device, non_blocking=True).float()  # 输入保持 fp32（更稳）
+            by_logits = by_logits.to(device, non_blocking=True).float()
+
+            # 统一用 fp32 做 loss（更稳）
             pred = model(bx)
-            loss = criterion(pred, by_logits)
+            tgt = by_logits
+
+            optimizer.zero_grad(set_to_none=True)
+            loss = criterion(pred, tgt)
             loss.backward()
             optimizer.step()
-            train_loss += loss.item()
-        
-        avg_train_loss = train_loss / len(train_loader)
+
+            tr_sum += loss.item()
+            tr_n += 1
+
+        local_train = tr_sum / max(1, tr_n)
+        global_train = all_reduce_mean(local_train, device)
 
         model.eval()
-        val_loss = 0.0
+        va_sum, va_n = 0.0, 0
         with torch.no_grad():
             for bx, by_logits, _ in val_loader:
-                bx, by_logits = bx.to(device, non_blocking=True), by_logits.to(device, non_blocking=True)
+                bx = bx.to(device, non_blocking=True).float()
+                by_logits = by_logits.to(device, non_blocking=True).float()
                 pred = model(bx)
-                loss = criterion(pred, by_logits)
-                val_loss += loss.item()
-        
-        avg_val_loss = val_loss / len(val_loader)
-        scheduler.step(avg_val_loss)
+                tgt = by_logits
+                loss = criterion(pred, tgt)
+                va_sum += loss.item()
+                va_n += 1
 
-        if avg_val_loss < best_val_loss:
-            best_val_loss = avg_val_loss
+        local_val = va_sum / max(1, va_n)
+        global_val = all_reduce_mean(local_val, device)
+        scheduler.step(global_val)
+
+        if global_val < best_val:
+            best_val = global_val
             early_stop_cnt = 0
-            save_path = os.path.join(OUTPUT_DIR, f"rs_l{layer_idx}.pth")
-            if num_gpus > 1:
+            if is_main:
                 torch.save(model.module.state_dict(), save_path)
-            else:
-                torch.save(model.state_dict(), save_path)
         else:
             early_stop_cnt += 1
-            if early_stop_cnt >= EARLY_STOP_PATIENCE:  # 使用配置的 Patience
-                print(f"Layer {layer_idx} Early stopping at epoch {epoch}")
-                break
-        
-        history["train_loss"].append(avg_train_loss)
-        history["val_loss"].append(avg_val_loss)
-        
-        if (epoch + 1) % 5 == 0:
-            print(f"Ep {epoch+1}: T_Loss={avg_train_loss:.4f}, V_Loss={avg_val_loss:.4f}")
 
-    # Testing
-    print(f"Testing Layer {layer_idx}...")
-    save_path = os.path.join(OUTPUT_DIR, f"rs_l{layer_idx}.pth")
-    if num_gpus > 1:
-        model.module.load_state_dict(torch.load(save_path))
-    else:
-        model.load_state_dict(torch.load(save_path))
+        history["train_loss"].append(global_train)
+        history["val_loss"].append(global_val)
+
+        if is_main and (epoch + 1) % 5 == 0:
+            print(f"Ep{epoch+1}: Train={global_train:.4f} Val={global_val:.4f} LR={optimizer.param_groups[0]['lr']:.2e}")
+
+        stop_flag = 1 if early_stop_cnt >= args.early_stop_patience else 0
+        stop_flag = int(all_reduce_sum(stop_flag, device) > 0)
+        if stop_flag:
+            if is_main:
+                print(f"Early stop at ep{epoch+1}, best_val={best_val:.4f}")
+            break
+
+    ddp_barrier()
+
+    # load best and test
+    state = torch.load(save_path, map_location="cpu")
+    model.module.load_state_dict(state)
     model.eval()
 
-    recall_accum = {k: 0.0 for k in TOP_K_LIST}
-    test_mse = 0.0
-    test_mae = 0.0
-    
+    recall_acc = {k: 0.0 for k in args.top_k_list}
+    mse_sum, mae_sum, batches = 0.0, 0.0, 0
     with torch.no_grad():
         for bx, by_logits, by_indices in test_loader:
-            bx = bx.to(device, non_blocking=True)
-            by_logits = by_logits.to(device, non_blocking=True)
+            bx = bx.to(device, non_blocking=True).float()
+            by_logits = by_logits.to(device, non_blocking=True).float()
             by_indices = by_indices.to(device, non_blocking=True)
 
-            pred_logits = model(bx)
-            recall_dict = compute_recall_at_ks(pred_logits, by_indices, ks=TOP_K_LIST)
-            for k in TOP_K_LIST:
-                recall_accum[k] += recall_dict[k]
+            pred = model(bx)
+            tgt = by_logits
             
-            mse, mae = compute_regression_metrics(pred_logits, by_logits)
-            test_mse += mse
-            test_mae += mae
-    
-    final_recall = {k: recall_accum[k]/len(test_loader) for k in TOP_K_LIST}
-    final_mse = test_mse / len(test_loader)
-    final_mae = test_mae / len(test_loader)
+            r = compute_recall_at_ks(pred, by_indices, args.top_k_list)
+            for k in args.top_k_list:
+                recall_acc[k] += r[k]
+            mse, mae = compute_regression_metrics(pred, tgt)
+            mse_sum += mse
+            mae_sum += mae
+            batches += 1
 
-    print(f"Layer {layer_idx} Result: Recall@Top2={final_recall[2]:.4f}")
-    
-    return history, {
+    gbatches = all_reduce_sum(float(batches), device)
+    final_recall = {k: all_reduce_sum(recall_acc[k], device) / max(1.0, gbatches) for k in args.top_k_list}
+    final_mse = all_reduce_sum(mse_sum, device) / max(1.0, gbatches)
+    final_mae = all_reduce_sum(mae_sum, device) / max(1.0, gbatches)
+
+    metrics = {
         "layer": layer_idx,
-        "recall_2": final_recall[2],
-        "recall_3": final_recall[3],
-        "recall_4": final_recall[4],
+        "source_layer": source_layer,
+        "recall_2": final_recall.get(2, float("nan")),
+        "recall_3": final_recall.get(3, float("nan")),
+        "recall_4": final_recall.get(4, float("nan")),
         "mse": final_mse,
         "mae": final_mae,
-        "val_loss": best_val_loss
+        "val_loss": best_val,
+        "ckpt": save_path,
     }
+    if is_main:
+        print(f"Test: R2={metrics['recall_2']:.4f} R3={metrics['recall_3']:.4f} R4={metrics['recall_4']:.4f} MSE={final_mse:.6f}")
+    return history, metrics
+
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--data-dir", default="/home/ztl/wyf/SPARSE/SPARSE_Frame/results/profile_data/Qwen1.5MoE_allData/rs_chunks")
+    ap.add_argument("--output-dir", default="/home/ztl/wyf/SPARSE/SPARSE_Frame/results/mlp_trainer/Qwen1.5MoE_allData")
+    ap.add_argument("--per-gpu-batch-size", type=int, default=128)
+    ap.add_argument("--epochs", type=int, default=100)
+    ap.add_argument("--lr", type=float, default=1e-3)
+    ap.add_argument("--weight-decay", type=float, default=1e-4)
+    ap.add_argument("--early-stop-patience", type=int, default=10)
+    ap.add_argument("--group-size", type=int, default=3)
+    ap.add_argument("--num-workers", type=int, default=0)  # 先用0排障
+    ap.add_argument("--pin-memory", action="store_true", default=False)
+    ap.add_argument("--top-k-list", type=str, default="2,3,4")
+    ap.add_argument("--tail-epsilon", type=float, default=0.01)
+    ap.add_argument("--cpu-fp32", action="store_true", default=False,
+                    help="force load inputs/logits as fp32 on CPU (default fp16 to save RAM)")
+    ap.add_argument("--start-layer", type=int, default=0, help="resume training from this layer index (inclusive)")
+    args = ap.parse_args()
+    args.top_k_list = [int(k) for k in args.top_k_list.split(",")]
+
+    local_rank, rank, world_size = setup_ddp()
+    device = torch.device("cuda", local_rank)
+    is_main = (rank == 0)
+
     torch.manual_seed(42)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(42)
-        
-    num_gpus = torch.cuda.device_count()
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Found {num_gpus} GPUs. Running Serial Training per Layer.")
+    torch.cuda.manual_seed_all(42)
 
-    # 1. 加载 Inputs
-    X = load_source_data_chunks()
-    if X is None:
-        print("Error: Failed to load source inputs.")
-        return
+    os.makedirs(args.output_dir, exist_ok=True)
+    if is_main:
+        os.makedirs(os.path.join(args.output_dir, "plots"), exist_ok=True)
+        csv_path = os.path.join(args.output_dir, "metrics_summary.csv")
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["Layer", "SourceLayer", "Recall@2", "Recall@3", "Recall@4", "MSE", "MAE", "Best_Val_Loss", "CkptPath"])
 
-    # 2. 自动检测层
-    all_label_files = glob.glob(os.path.join(DATA_DIR, "rs_labels_l*_chunk_*.pt"))
-    
-    detected_layers = set()
-    for f in all_label_files:
-        filename = os.path.basename(f)
-        match = re.search(r'rs_labels_l(\d+)_chunk', filename)
-        if match:
-            detected_layers.add(int(match.group(1)))
-            
-    detected_layers = sorted(list(detected_layers))
-    
-    if not detected_layers:
-        print("CRITICAL: No layer data detected! Check DATA_DIR path and file naming.")
-        return
-        
-    print(f"Detected {len(detected_layers)} layers to train: {detected_layers}")
-    
-    csv_path = os.path.join(OUTPUT_DIR, "metrics_summary.csv")
-    with open(csv_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow([
-            "Layer", 
-            "Recall@2", "Recall@3", "Recall@4",
-            "MSE", "MAE", "Best_Val_Loss"
-        ])
-    
-    all_histories = {}
-    all_metrics = {}
+    ddp_barrier()
 
-    for layer_idx in detected_layers:
+    all_label_files = glob.glob(os.path.join(args.data_dir, "rs_labels_l*_chunk_*.pt"))
+    layers = sorted({int(re.search(r"rs_labels_l(\d+)_chunk", os.path.basename(f)).group(1)) for f in all_label_files})
+    groups: Dict[int, List[int]] = {}
+    for l in layers:
+        s = (l // args.group_size) * args.group_size
+        groups.setdefault(s, []).append(l)
+    group_keys = sorted(groups.keys())
+    if is_main:
+        print(f"[DDP] world_size={world_size} local_rank={local_rank} device={device}")
+        print(f"Detected {len(layers)} layers: {layers}")
+
+    input_cache: Dict[int, torch.Tensor] = {}
+    all_histories, all_metrics = {}, {}
+
+    start_layer = getattr(args, "start_layer", 0)
+
+    for source_layer in group_keys:
+        # 如果整个组都在 start_layer 前，可以跳过
+        if max(groups[source_layer]) < start_layer:
+            continue
         release_gpu_memory()
-        
-        try:
-            hist, metrics = train_single_layer(layer_idx, X, device, num_gpus)
-            
-            if metrics is None: continue
-            
-            all_histories[layer_idx] = hist
-            all_metrics[layer_idx] = metrics
-            
-            # 实时写入 CSV
-            with open(csv_path, "a", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow([
-                    metrics["layer"],
-                    f"{metrics['recall_2']:.4f}", f"{metrics['recall_3']:.4f}", f"{metrics['recall_4']:.4f}",
-                    f"{metrics['mse']:.6f}", f"{metrics['mae']:.6f}", f"{metrics['val_loss']:.4f}"
-                ])
-                
-        except Exception as e:
-            print(f"Error training layer {layer_idx}: {e}")
-            import traceback
-            traceback.print_exc()
+        X_source = load_source_data_chunks_sharded(args.data_dir, source_layer, rank, world_size, fp32=args.cpu_fp32)
+        has_x = X_source is not None
+        ok = ddp_all_true(has_x, device)
+        if not ok:
+            if is_main:
+                print(f"[Skip-All] source_layer {source_layer}: some rank missing inputs")
+            ddp_barrier()
             continue
 
-    # 绘图
-    if all_histories:
+        if is_main:
+            print(f"[ShardCheck] source_layer {source_layer}: rank0 tokens={len(X_source)}")
+
+        for layer_idx in groups[source_layer]:
+            if layer_idx < start_layer:
+                continue
+
+            if is_main:
+                print(f"[Map] layer {layer_idx} <- inputs from layer {source_layer}")
+
+            hist, metrics = train_single_layer(layer_idx, X_source, source_layer, device, args)
+            ddp_barrier()
+
+        if metrics is None:
+            continue
+
+        if is_main:
+            all_histories[layer_idx] = hist
+            all_metrics[layer_idx] = metrics
+            csv_path = os.path.join(args.output_dir, "metrics_summary.csv")
+            with open(csv_path, "a", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow([
+                    metrics["layer"], metrics["source_layer"],
+                    f"{metrics['recall_2']:.4f}", f"{metrics['recall_3']:.4f}", f"{metrics['recall_4']:.4f}",
+                    f"{metrics['mse']:.6f}", f"{metrics['mae']:.6f}", f"{metrics['val_loss']:.4f}",
+                    metrics["ckpt"]
+                ])
+
+    del X_source
+    gc.collect()
+    release_gpu_memory()
+    ddp_barrier()
+
+    if is_main and all_histories:
         plt.figure(figsize=(15, 12))
-        
+        plot_layers = sorted(all_histories.keys())
+        plot_indices = [l for l in plot_layers if (l % 4 == 0) or (l == plot_layers[0]) or (l == plot_layers[-1])]
+
         plt.subplot(2, 1, 1)
-        plot_indices = [l for l in all_histories.keys() if l % 4 == 0 or l == detected_layers[0] or l == detected_layers[-1]]
         for l in plot_indices:
             plt.plot(all_histories[l]["val_loss"], label=f"L{l} Val Loss")
         plt.title("Validation Loss Curve (Selected Layers)")
@@ -372,29 +467,31 @@ def main():
         plt.ylabel("Loss")
         plt.legend()
         plt.grid(True, alpha=0.3)
-        
+
         plt.subplot(2, 1, 2)
-        if plot_indices:
-            recall_2 = [all_metrics[l]["recall_2"] for l in plot_indices]
-            recall_3 = [all_metrics[l]["recall_3"] for l in plot_indices]
-            recall_4 = [all_metrics[l]["recall_4"] for l in plot_indices]
-            
-            x = np.arange(len(plot_indices))
-            width = 0.25
-            plt.bar(x - width, recall_2, width, label="Recall@2")
-            plt.bar(x, recall_3, width, label="Recall@3")
-            plt.bar(x + width, recall_4, width, label="Recall@4")
-            
-            plt.title("Recall Metrics (Selected Layers)")
-            plt.xlabel("Layer Index")
-            plt.ylabel("Recall Score")
-            plt.xticks(x, plot_indices)
-            plt.legend()
-            plt.grid(True, alpha=0.3)
-        
+        recall_2 = [all_metrics[l]["recall_2"] for l in plot_indices]
+        recall_3 = [all_metrics[l]["recall_3"] for l in plot_indices]
+        recall_4 = [all_metrics[l]["recall_4"] for l in plot_indices]
+
+        x = np.arange(len(plot_indices))
+        width = 0.25
+        plt.bar(x - width, recall_2, width, label="Recall@2")
+        plt.bar(x, recall_3, width, label="Recall@3")
+        plt.bar(x + width, recall_4, width, label="Recall@4")
+        plt.title("Recall Metrics (Selected Layers)")
+        plt.xlabel("Layer Index")
+        plt.ylabel("Recall Score")
+        plt.xticks(x, plot_indices)
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+
         plt.tight_layout()
-        plt.savefig(os.path.join(OUTPUT_DIR, "plots", "training_summary.png"))
-        print(f"\n All training complete. Metrics saved to {OUTPUT_DIR}")
+        out_png = os.path.join(args.output_dir, "plots", "training_summary.png")
+        plt.savefig(out_png)
+        print(f"Done. CSV: {os.path.join(args.output_dir, 'metrics_summary.csv')}, Plot: {out_png}")
+
+    dist.destroy_process_group()
+
 
 if __name__ == "__main__":
     main()
