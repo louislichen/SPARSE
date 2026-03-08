@@ -11,3 +11,4 @@ SPARSE_Frame/scripts/test/
 SPARSE_Frame/modules/
 SPARSE_gpt/
 SPARSE_Frame/results/
+SPARSE_Frame/utils/eval_core_fix.py
