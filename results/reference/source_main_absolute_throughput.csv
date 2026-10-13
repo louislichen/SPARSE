@@ -1,0 +1,97 @@
+setting,workload,method,metric,throughput_tok_s,throughput_slice_sd,request_slices,repeats_per_slice,comparison_block,gain_vs_best_other_pct,best_other_method
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,RR-LRU,E2E,2.5858985315344123,0.0293106533505135,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,RR-LRU,Decode,7.931289010489996,0.2391743192942292,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,LoD/RR no-cache,E2E,2.276225997306449,0.0092012946362128,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,LoD/RR no-cache,Decode,5.526829089802044,0.0418779046674445,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,EPLB-like,E2E,2.549391551863075,0.0280526776954416,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,EPLB-like,Decode,8.013862594466817,0.1966754548880999,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,Static-hot cache,E2E,2.6419914236536095,0.0245239364045187,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,Static-hot cache,Decode,7.961072201587898,0.1267959452154843,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,MoE-Infinity-style,E2E,1.7886292893854263,0.017305576075576,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,MoE-Infinity-style,Decode,3.2093252865376107,0.0443813057403065,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,Prism/DanceMoE static,E2E,2.711427801412841,0.0274536703195491,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,Prism/DanceMoE static,Decode,8.194935748442965,0.1657345490504611,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,SPARSE,E2E,2.746326378304479,0.0138278068268662,4,3,matched baseline comparison,1.2870922424507603,Prism/DanceMoE static
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,SPARSE,Decode,8.940265870184106,0.1874976108411647,4,3,matched baseline comparison,9.09500873002882,Prism/DanceMoE static
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,RR-LRU,E2E,6.654101885889525,0.0287208538036199,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,RR-LRU,Decode,11.63904955615271,0.0855245437155102,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,LoD/RR no-cache,E2E,5.049238058377433,0.0497215980308921,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,LoD/RR no-cache,Decode,7.436990301323785,0.1018276485222592,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,EPLB-like,E2E,6.505246846732071,0.0667851545233326,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,EPLB-like,Decode,11.427151176995167,0.1984791619864101,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,Static-hot cache,E2E,6.757580886572864,0.0619763142064526,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,Static-hot cache,Decode,11.72855248247547,0.1832626943159385,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,MoE-Infinity-style,E2E,4.158303854390159,0.0738386754905526,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,MoE-Infinity-style,Decode,5.581376201341923,0.1312304095501293,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,Prism/DanceMoE static,E2E,6.785247898561801,0.1190597218219589,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,Prism/DanceMoE static,Decode,11.641754599327266,0.3054913704856702,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,SPARSE,E2E,7.675549299587832,0.1041517636409174,4,3,matched baseline comparison,13.121132998172968,Prism/DanceMoE static
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,SPARSE,Decode,14.797255777141602,0.3741434004767291,4,3,matched baseline comparison,26.164382171212665,Static-hot cache
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,RR-LRU,E2E,10.550638298363328,0.0378908406534359,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,RR-LRU,Decode,15.447742990431426,0.0900272245920236,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,LoD/RR no-cache,E2E,7.4695029865492,0.031527343089887,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,LoD/RR no-cache,Decode,9.599313537038189,0.0574232828413667,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,EPLB-like,E2E,10.42629033982418,0.0582160423761931,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,EPLB-like,Decode,15.370352055094443,0.1026903899698835,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,Static-hot cache,E2E,10.701546059448807,0.0145189128615748,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,Static-hot cache,Decode,15.52598222272902,0.0205877156186926,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,MoE-Infinity-style,E2E,7.036851626429222,0.0723899904424853,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,MoE-Infinity-style,Decode,8.813022943717382,0.1106379865743676,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,Prism/DanceMoE static,E2E,10.77634198815285,0.1044534998599712,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,Prism/DanceMoE static,Decode,15.51534805796938,0.2079848942659058,4,3,matched baseline comparison,,
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,SPARSE,E2E,13.034327199780725,0.0695546743837965,4,3,matched baseline comparison,20.953169583057285,Prism/DanceMoE static
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,SPARSE,Decode,21.00191989902495,0.1691392947453551,4,3,matched baseline comparison,35.269508864176835,Static-hot cache
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,RR-LRU,E2E,1.3998223179397735,0.002563138901969,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,RR-LRU,Decode,7.636937152853621,0.1071061475531662,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,LoD/RR no-cache,E2E,1.2993265241444572,0.0095191161979905,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,LoD/RR no-cache,Decode,5.339895941754864,0.1295004567798637,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,EPLB-like,E2E,1.3621343554522505,0.015098805959049,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,EPLB-like,Decode,7.4061949673350576,0.2563445338176444,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,Static-hot cache,E2E,1.4461741455339394,0.0098533803958606,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,Static-hot cache,Decode,7.612714290552361,0.1084677377653878,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,MoE-Infinity-style,E2E,1.1396980258700578,0.0061787688917695,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,MoE-Infinity-style,Decode,3.0929316164023604,0.0248282622732654,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,Prism/DanceMoE static,E2E,1.4801350745968078,0.0166877606403016,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,Prism/DanceMoE static,Decode,7.628051146303271,0.2027873672596946,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,SPARSE,E2E,1.480665141449929,0.0140255447112202,4,3,matched baseline comparison,0.03581205946798782,Prism/DanceMoE static
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,SPARSE,Decode,8.59105516154829,0.3685640201233897,4,3,matched baseline comparison,12.493464193798598,RR-LRU
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,RR-LRU,E2E,4.243839172363977,0.0296100609329991,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,RR-LRU,Decode,10.986688041481344,0.1682243150300759,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,LoD/RR no-cache,E2E,3.519234169496846,0.0321211585728542,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,LoD/RR no-cache,Decode,7.12933527843135,0.1133767525541211,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,EPLB-like,E2E,4.147578932146903,0.0076494984190197,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,EPLB-like,Decode,10.789248837139256,0.0824217210295404,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,Static-hot cache,E2E,4.323139293117194,0.0332518367273852,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,Static-hot cache,Decode,10.87466397508065,0.1763507847241451,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,MoE-Infinity-style,E2E,3.083093279222685,0.0492150771769743,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,MoE-Infinity-style,Decode,5.365956578632134,0.1450552675484474,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,Prism/DanceMoE static,E2E,4.387158730248338,0.011715383867263,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,Prism/DanceMoE static,Decode,10.87457196310711,0.1424078147916775,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,SPARSE,E2E,4.745224195976635,0.0172805873481115,4,3,matched baseline comparison,8.161671089298128,Prism/DanceMoE static
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,SPARSE,Decode,14.006419889840748,0.1431289430053217,4,3,matched baseline comparison,27.485369903633416,RR-LRU
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,RR-LRU,E2E,7.148032065293526,0.0287127287745174,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,RR-LRU,Decode,14.308136320361823,0.1339619016599561,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,LoD/RR no-cache,E2E,5.558602772245429,0.0187395567804187,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,LoD/RR no-cache,Decode,9.074707485422064,0.0581475152573224,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,EPLB-like,E2E,6.986642466300275,0.0346190082460009,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,EPLB-like,Decode,14.0005862558387,0.183202701344992,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,Static-hot cache,E2E,7.262989692425892,0.0516126356681552,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,Static-hot cache,Decode,14.160326063913312,0.1582769759106924,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,MoE-Infinity-style,E2E,5.366357164977,0.0790683595273061,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,MoE-Infinity-style,Decode,8.356383547825024,0.1835945239261651,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,Prism/DanceMoE static,E2E,7.343263748741083,0.0415582647412211,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,Prism/DanceMoE static,Decode,14.09620703920476,0.1128457214458459,4,3,matched baseline comparison,,
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,SPARSE,E2E,8.390299303343877,0.0636290185400146,4,3,matched baseline comparison,14.25844951820363,Prism/DanceMoE static
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,SPARSE,Decode,19.195276129274543,0.2561383074935341,4,3,matched baseline comparison,34.1563687924741,RR-LRU
+"DeepSeek, 400 Mbit/s",b1/p1024/n32 long prefill,RR-LRU,E2E,0.8849292309386418,0.0103318186440951,4,3,matched main run,,
+"DeepSeek, 400 Mbit/s",b1/p1024/n32 long prefill,RR-LRU,Decode,5.742257431191524,0.2657784030664016,4,3,matched main run,,
+"DeepSeek, 400 Mbit/s",b1/p1024/n32 long prefill,SPARSE,E2E,0.9749020204150366,0.0062633133566403,4,3,matched main run,10.167229912945785,RR-LRU
+"DeepSeek, 400 Mbit/s",b1/p1024/n32 long prefill,SPARSE,Decode,6.726569352908518,0.2375791737755938,4,3,matched main run,17.141549878455177,RR-LRU
+"DeepSeek, 400 Mbit/s",b2/p512/n64 balanced,RR-LRU,E2E,2.740797579727271,0.0291899375359498,4,3,matched main run,,
+"DeepSeek, 400 Mbit/s",b2/p512/n64 balanced,RR-LRU,Decode,7.707102181449793,0.2361238035733104,4,3,matched main run,,
+"DeepSeek, 400 Mbit/s",b2/p512/n64 balanced,SPARSE,E2E,3.1177100811197405,0.0251540468833179,4,3,matched main run,13.75192769361593,RR-LRU
+"DeepSeek, 400 Mbit/s",b2/p512/n64 balanced,SPARSE,Decode,9.669636285531617,0.1598687205836101,4,3,matched main run,25.46396891954337,RR-LRU
+"DeepSeek, 400 Mbit/s",b4/p512/n128 decode-heavy,RR-LRU,E2E,4.519692347953951,0.0165685369373945,4,3,matched main run,,
+"DeepSeek, 400 Mbit/s",b4/p512/n128 decode-heavy,RR-LRU,Decode,9.382989841038732,0.0733371717443717,4,3,matched main run,,
+"DeepSeek, 400 Mbit/s",b4/p512/n128 decode-heavy,SPARSE,E2E,5.073655432351293,0.0238271202860393,4,3,matched main run,12.256654695714397,RR-LRU
+"DeepSeek, 400 Mbit/s",b4/p512/n128 decode-heavy,SPARSE,Decode,10.958307319075857,0.1584755293271403,4,3,matched main run,16.789077945572316,RR-LRU

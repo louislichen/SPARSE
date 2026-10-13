@@ -1,0 +1,7 @@
+output_tokens,metric,gain_mean_pct,gain_slice_sd_pct,model,network,batch,prompt_tokens,baseline,request_slices,repeats_per_slice
+32,E2E,6.213286475891233,1.2164580787416517,Qwen1.5-MoE-A2.7B,native physical link (0.88 Gbit/s),1,1024,same-length RR-LRU,4,3
+32,Decode,12.825122475626776,5.015958823468843,Qwen1.5-MoE-A2.7B,native physical link (0.88 Gbit/s),1,1024,same-length RR-LRU,4,3
+128,E2E,10.597057051204288,0.7317296143068225,Qwen1.5-MoE-A2.7B,native physical link (0.88 Gbit/s),1,1024,same-length RR-LRU,4,3
+128,Decode,14.732684558589598,0.8342048663059981,Qwen1.5-MoE-A2.7B,native physical link (0.88 Gbit/s),1,1024,same-length RR-LRU,4,3
+256,E2E,10.12260258086297,1.4688140488431567,Qwen1.5-MoE-A2.7B,native physical link (0.88 Gbit/s),1,1024,same-length RR-LRU,4,3
+256,Decode,12.068079889477612,2.00630081822708,Qwen1.5-MoE-A2.7B,native physical link (0.88 Gbit/s),1,1024,same-length RR-LRU,4,3

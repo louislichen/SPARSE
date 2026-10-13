@@ -1,0 +1,337 @@
+setting,workload,method,metric,request_slice,normalized_throughput,baseline,request_slices,repeats_per_slice
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,LoD/RR no-cache,E2E,stream00,0.8720102048828816,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,LoD/RR no-cache,E2E,stream01,0.8881571498046814,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,LoD/RR no-cache,E2E,stream02,0.8769475697150824,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,LoD/RR no-cache,E2E,stream03,0.8841048124877663,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,LoD/RR no-cache,Decode,stream00,0.6758823828561981,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,LoD/RR no-cache,Decode,stream01,0.7138784588999018,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,LoD/RR no-cache,Decode,stream02,0.6921464259289369,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,LoD/RR no-cache,Decode,stream03,0.7069530569336604,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,RR-LRU,E2E,stream00,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,RR-LRU,E2E,stream01,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,RR-LRU,E2E,stream02,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,RR-LRU,E2E,stream03,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,RR-LRU,Decode,stream00,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,RR-LRU,Decode,stream01,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,RR-LRU,Decode,stream02,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,RR-LRU,Decode,stream03,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,EPLB-like,E2E,stream00,0.9791099859342225,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,EPLB-like,E2E,stream01,0.9841809351042861,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,EPLB-like,E2E,stream02,0.9769674769024734,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,EPLB-like,E2E,stream03,1.0035023955846267,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,EPLB-like,Decode,stream00,0.9817842270259765,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,EPLB-like,Decode,stream01,1.0164207143184256,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,EPLB-like,Decode,stream02,0.9862039246630945,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,EPLB-like,Decode,stream03,1.0595891409049671,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,Prism/DanceMoE static,E2E,stream00,1.0518045211023754,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,Prism/DanceMoE static,E2E,stream01,1.0505784341401703,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,Prism/DanceMoE static,E2E,stream02,1.0409027973427827,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,Prism/DanceMoE static,E2E,stream03,1.0509684834933148,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,Prism/DanceMoE static,Decode,stream00,1.0212049431546935,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,Prism/DanceMoE static,Decode,stream01,1.0391666116016676,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,Prism/DanceMoE static,Decode,stream02,1.020737797140554,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,Prism/DanceMoE static,Decode,stream03,1.0529777264014644,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,Static-hot cache,E2E,stream00,1.018152280146877,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,Static-hot cache,E2E,stream01,1.0224021585429075,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,Static-hot cache,E2E,stream02,1.020444401307222,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,Static-hot cache,E2E,stream03,1.0258488095778053,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,Static-hot cache,Decode,stream00,0.9824776018905007,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,Static-hot cache,Decode,stream01,1.013665857871835,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,Static-hot cache,Decode,stream02,0.9968600126933752,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,Static-hot cache,Decode,stream03,1.0234934549404258,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,MoE-Infinity-style,E2E,stream00,0.6931247946513139,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,MoE-Infinity-style,E2E,stream01,0.6926517103368914,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,MoE-Infinity-style,E2E,stream02,0.6862435677091914,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,MoE-Infinity-style,E2E,stream03,0.6947901191674496,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,MoE-Infinity-style,Decode,stream00,0.39852978914770926,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,MoE-Infinity-style,Decode,stream01,0.41186808643246514,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,MoE-Infinity-style,Decode,stream02,0.39745977042064706,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,MoE-Infinity-style,Decode,stream03,0.41137301447716806,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,SPARSE,E2E,stream00,1.0502241048668364,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,SPARSE,E2E,stream01,1.0697575357441582,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,SPARSE,E2E,stream02,1.053439776575401,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,SPARSE,E2E,stream03,1.0751100418492536,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,SPARSE,Decode,stream00,1.0777534243337266,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,SPARSE,Decode,stream01,1.1595878976067235,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,SPARSE,Decode,stream02,1.0940575749122958,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b1/p1024/n32 long prefill,SPARSE,Decode,stream03,1.1816060021723254,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,LoD/RR no-cache,E2E,stream00,0.7475867054494435,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,LoD/RR no-cache,E2E,stream01,0.7565021934943014,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,LoD/RR no-cache,E2E,stream02,0.7621487486046887,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,LoD/RR no-cache,E2E,stream03,0.7690999861587886,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,LoD/RR no-cache,Decode,stream00,0.6247743003534934,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,LoD/RR no-cache,Decode,stream01,0.6360852087457719,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,LoD/RR no-cache,Decode,stream02,0.6429987748770742,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,LoD/RR no-cache,Decode,stream03,0.6522027769661067,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,RR-LRU,E2E,stream00,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,RR-LRU,E2E,stream01,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,RR-LRU,E2E,stream02,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,RR-LRU,E2E,stream03,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,RR-LRU,Decode,stream00,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,RR-LRU,Decode,stream01,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,RR-LRU,Decode,stream02,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,RR-LRU,Decode,stream03,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,EPLB-like,E2E,stream00,0.9836591486236318,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,EPLB-like,E2E,stream01,0.9757333673683385,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,EPLB-like,E2E,stream02,0.9846255875305209,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,EPLB-like,E2E,stream03,0.966481278969461,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,EPLB-like,Decode,stream00,0.9876779508355369,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,EPLB-like,Decode,stream01,0.9813340577885812,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,EPLB-like,Decode,stream02,0.9954977664880333,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,EPLB-like,Decode,stream03,0.9625994203957581,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,Prism/DanceMoE static,E2E,stream00,1.037809289969483,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,Prism/DanceMoE static,E2E,stream01,0.9953969675669693,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,Prism/DanceMoE static,E2E,stream02,1.0333844374281542,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,Prism/DanceMoE static,E2E,stream03,1.0123737503363823,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,Prism/DanceMoE static,Decode,stream00,1.0225895578909046,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,Prism/DanceMoE static,Decode,stream01,0.9628847095333868,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,Prism/DanceMoE static,Decode,stream02,1.023924268995209,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,Prism/DanceMoE static,Decode,stream03,0.991849987253812,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,Static-hot cache,E2E,stream00,1.0204459079288595,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,Static-hot cache,E2E,stream01,0.9970734755140123,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,Static-hot cache,E2E,stream02,1.02611646397473,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,Static-hot cache,E2E,stream03,1.018709929288196,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,Static-hot cache,Decode,stream00,1.0150578172635203,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,Static-hot cache,Decode,stream01,0.9779935843842846,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,Static-hot cache,Decode,stream02,1.0262315608920067,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,Static-hot cache,Decode,stream03,1.0118371697298458,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,MoE-Infinity-style,E2E,stream00,0.6175085857672304,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,MoE-Infinity-style,E2E,stream01,0.6265320745623375,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,MoE-Infinity-style,E2E,stream02,0.6397131679645486,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,MoE-Infinity-style,E2E,stream03,0.6159458098759152,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,MoE-Infinity-style,Decode,stream00,0.47130968529505396,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,MoE-Infinity-style,Decode,stream01,0.4807270744589639,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,MoE-Infinity-style,Decode,stream02,0.4953461995210079,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,MoE-Infinity-style,Decode,stream03,0.47082206705669466,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,SPARSE,E2E,stream00,1.133348960124879,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,SPARSE,E2E,stream01,1.1571740424908776,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,SPARSE,E2E,stream02,1.150343615654459,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,SPARSE,E2E,stream03,1.1732270905021018,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,SPARSE,Decode,stream00,1.2305756908890388,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,SPARSE,Decode,stream01,1.2805219559919687,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,SPARSE,Decode,stream02,1.261586872980644,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b2/p512/n64 balanced,SPARSE,Decode,stream03,1.3129858497181384,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,LoD/RR no-cache,E2E,stream00,0.7099365326140127,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,LoD/RR no-cache,E2E,stream01,0.7065442642707749,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,LoD/RR no-cache,E2E,stream02,0.7103846443943772,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,LoD/RR no-cache,E2E,stream03,0.7050114435928909,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,LoD/RR no-cache,Decode,stream00,0.6229117927032419,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,LoD/RR no-cache,Decode,stream01,0.6191821756488736,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,LoD/RR no-cache,Decode,stream02,0.6243957503193017,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,LoD/RR no-cache,Decode,stream03,0.6191477557928885,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,RR-LRU,E2E,stream00,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,RR-LRU,E2E,stream01,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,RR-LRU,E2E,stream02,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,RR-LRU,E2E,stream03,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,RR-LRU,Decode,stream00,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,RR-LRU,Decode,stream01,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,RR-LRU,Decode,stream02,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,RR-LRU,Decode,stream03,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,EPLB-like,E2E,stream00,0.9929734777761332,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,EPLB-like,E2E,stream01,0.9759648118991946,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,EPLB-like,E2E,stream02,0.9954762424359853,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,EPLB-like,E2E,stream03,0.9885295549159189,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,EPLB-like,Decode,stream00,1.001703781037523,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,EPLB-like,Decode,stream01,0.9804922763648203,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,EPLB-like,Decode,stream02,1.0028620883717114,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,EPLB-like,Decode,stream03,0.9950465571151513,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,Prism/DanceMoE static,E2E,stream00,1.008973975887312,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,Prism/DanceMoE static,E2E,stream01,1.0195136730231371,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,Prism/DanceMoE static,E2E,stream02,1.0335907634861516,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,Prism/DanceMoE static,E2E,stream03,1.0235188845243826,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,Prism/DanceMoE static,Decode,stream00,0.9856842523625985,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,Prism/DanceMoE static,Decode,stream01,1.002417665072306,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,Prism/DanceMoE static,Decode,stream02,1.0183648315589588,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,Prism/DanceMoE static,Decode,stream03,1.0111142742325838,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,Static-hot cache,E2E,stream00,1.0144387180824117,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,Static-hot cache,E2E,stream01,1.0097877214730535,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,Static-hot cache,E2E,stream02,1.0180179985395654,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,Static-hot cache,E2E,stream03,1.0150022084204282,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,Static-hot cache,Decode,stream00,1.0038282614511402,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,Static-hot cache,Decode,stream01,0.9981265957287894,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,Static-hot cache,Decode,stream02,1.0081318418423313,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,Static-hot cache,Decode,stream03,1.0102636775041893,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,MoE-Infinity-style,E2E,stream00,0.6653054981709707,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,MoE-Infinity-style,E2E,stream01,0.6617086514336148,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,MoE-Infinity-style,E2E,stream02,0.6783954959011884,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,MoE-Infinity-style,E2E,stream03,0.662472057954064,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,MoE-Infinity-style,Decode,stream00,0.5680493275050685,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,MoE-Infinity-style,Decode,stream01,0.564110600424744,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,MoE-Infinity-style,Decode,stream02,0.5823902272366857,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,MoE-Infinity-style,Decode,stream03,0.5675382755754655,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,SPARSE,E2E,stream00,1.2282057196767784,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,SPARSE,E2E,stream01,1.2334742598253903,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,SPARSE,E2E,stream02,1.2438481675758877,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,SPARSE,E2E,stream03,1.2361203763174542,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,SPARSE,Decode,stream00,1.3451550167525628,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,SPARSE,Decode,stream01,1.3559099945240372,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,SPARSE,Decode,stream02,1.3714537287125002,"same-workload, same-slice RR-LRU",4,3
+"Qwen, native link (0.88 Gbit/s)",b4/p512/n128 decode-heavy,SPARSE,Decode,stream03,1.3657498558467074,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,LoD/RR no-cache,E2E,stream00,0.9219996347629436,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,LoD/RR no-cache,E2E,stream01,0.9336341506436798,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,LoD/RR no-cache,E2E,stream02,0.9345650291252268,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,LoD/RR no-cache,E2E,stream03,0.9226389316213481,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,LoD/RR no-cache,Decode,stream00,0.6796810758383488,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,LoD/RR no-cache,Decode,stream01,0.7165745102082178,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,LoD/RR no-cache,Decode,stream02,0.7239246875702807,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,LoD/RR no-cache,Decode,stream03,0.6775457868303725,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,RR-LRU,E2E,stream00,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,RR-LRU,E2E,stream01,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,RR-LRU,E2E,stream02,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,RR-LRU,E2E,stream03,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,RR-LRU,Decode,stream00,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,RR-LRU,Decode,stream01,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,RR-LRU,Decode,stream02,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,RR-LRU,Decode,stream03,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,EPLB-like,E2E,stream00,0.9826315000026423,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,EPLB-like,E2E,stream01,0.9591374924874263,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,EPLB-like,E2E,stream02,0.9734469752106648,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,EPLB-like,E2E,stream03,0.977070585138711,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,EPLB-like,Decode,stream00,1.0040561997650688,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,EPLB-like,Decode,stream01,0.9277730839672865,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,EPLB-like,Decode,stream02,0.9809275364656397,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,EPLB-like,Decode,stream03,0.9665142058855946,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,Prism/DanceMoE static,E2E,stream00,1.0755533165646258,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,Prism/DanceMoE static,E2E,stream01,1.0534804897414942,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,Prism/DanceMoE static,E2E,stream02,1.0558437917079773,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,Prism/DanceMoE static,E2E,stream03,1.0446610611395988,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,Prism/DanceMoE static,Decode,stream00,1.0362643648804075,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,Prism/DanceMoE static,Decode,stream01,0.9855959540498415,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,Prism/DanceMoE static,Decode,stream02,1.0114242945847196,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,Prism/DanceMoE static,Decode,stream03,0.9628285965269443,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,Static-hot cache,E2E,stream00,1.0421228398295825,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,Static-hot cache,E2E,stream01,1.0263790681741634,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,Static-hot cache,E2E,stream02,1.0353749102896597,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,Static-hot cache,E2E,stream03,1.0285805363689235,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,Static-hot cache,Decode,stream00,1.014156146844643,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,Static-hot cache,Decode,stream01,0.9871050502974912,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,Static-hot cache,Decode,stream02,1.0030021565429141,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,Static-hot cache,Decode,stream03,0.9833487075900894,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,MoE-Infinity-style,E2E,stream00,0.8208368616932167,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,MoE-Infinity-style,E2E,stream01,0.8109785712148402,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,MoE-Infinity-style,E2E,stream02,0.8144913972096437,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,MoE-Infinity-style,E2E,stream03,0.8103970527352883,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,MoE-Infinity-style,Decode,stream00,0.40855311033862346,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,MoE-Infinity-style,Decode,stream01,0.4048134563203608,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,MoE-Infinity-style,Decode,stream02,0.408122388922079,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,MoE-Infinity-style,Decode,stream03,0.39865448931083575,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,SPARSE,E2E,stream00,1.0552172839354668,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,SPARSE,E2E,stream01,1.0600938637050172,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,SPARSE,E2E,stream02,1.0701041254040378,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,SPARSE,E2E,stream03,1.045604393641278,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,SPARSE,Decode,stream00,1.0763793694443637,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,SPARSE,Decode,stream01,1.1705611589062246,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,SPARSE,Decode,stream02,1.1845005586686272,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b1/p1024/n32 long prefill,SPARSE,Decode,stream03,1.0703897992794795,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,LoD/RR no-cache,E2E,stream00,0.8216048272662753,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,LoD/RR no-cache,E2E,stream01,0.8331716031612711,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,LoD/RR no-cache,E2E,stream02,0.8280548836195122,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,LoD/RR no-cache,E2E,stream03,0.8342145169422485,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,LoD/RR no-cache,Decode,stream00,0.6358343308034712,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,LoD/RR no-cache,Decode,stream01,0.655006994973392,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,LoD/RR no-cache,Decode,stream02,0.6457198125228314,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,LoD/RR no-cache,Decode,stream03,0.6592995724590095,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,RR-LRU,E2E,stream00,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,RR-LRU,E2E,stream01,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,RR-LRU,E2E,stream02,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,RR-LRU,E2E,stream03,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,RR-LRU,Decode,stream00,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,RR-LRU,Decode,stream01,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,RR-LRU,Decode,stream02,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,RR-LRU,Decode,stream03,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,EPLB-like,E2E,stream00,0.9810487144396592,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,EPLB-like,E2E,stream01,0.9742089674898718,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,EPLB-like,E2E,stream02,0.9712357073404838,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,EPLB-like,E2E,stream03,0.9828905080647575,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,EPLB-like,Decode,stream00,0.9748878305388021,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,EPLB-like,Decode,stream01,0.9836613063679132,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,EPLB-like,Decode,stream02,0.9731077922483996,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,EPLB-like,Decode,stream03,0.9969003468404918,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,Prism/DanceMoE static,E2E,stream00,1.0362580125524599,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,Prism/DanceMoE static,E2E,stream01,1.033812498103738,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,Prism/DanceMoE static,E2E,stream02,1.0224205875610932,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,Prism/DanceMoE static,E2E,stream03,1.0427628152304227,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,Prism/DanceMoE static,Decode,stream00,0.9759709767832779,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,Prism/DanceMoE static,Decode,stream01,1.000054554357259,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,Prism/DanceMoE static,Decode,stream02,0.9666974321959592,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,Prism/DanceMoE static,Decode,stream03,1.0173535981777686,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,Static-hot cache,E2E,stream00,1.0104127765535273,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,Static-hot cache,E2E,stream01,1.019264727725625,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,Static-hot cache,E2E,stream02,1.0177126860802068,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,Static-hot cache,E2E,stream03,1.0274088165125739,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,Static-hot cache,Decode,stream00,0.9675826577908443,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,Static-hot cache,Decode,stream01,0.9952088173945923,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,Static-hot cache,Decode,stream02,0.9866050241015472,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,Static-hot cache,Decode,stream03,1.0102556440607258,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,MoE-Infinity-style,E2E,stream00,0.7209933219699184,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,MoE-Infinity-style,E2E,stream01,0.7233996023550557,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,MoE-Infinity-style,E2E,stream02,0.7373861099766525,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,MoE-Infinity-style,E2E,stream03,0.7240583788896066,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,MoE-Infinity-style,Decode,stream00,0.4807048387671256,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,MoE-Infinity-style,Decode,stream01,0.48533432031541485,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,MoE-Infinity-style,Decode,stream02,0.49909095665062586,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,MoE-Infinity-style,Decode,stream03,0.48832151573803456,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,SPARSE,E2E,stream00,1.1194471687686218,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,SPARSE,E2E,stream01,1.1203781950213183,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,SPARSE,E2E,stream02,1.1090464325377765,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,SPARSE,E2E,stream03,1.1238190696384431,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,SPARSE,Decode,stream00,1.2734966191963175,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,SPARSE,Decode,stream01,1.2871191453415973,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,SPARSE,Decode,stream02,1.2524702986536982,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b2/p512/n64 balanced,SPARSE,Decode,stream03,1.2868942154301783,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,LoD/RR no-cache,E2E,stream00,0.7757028976828741,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,LoD/RR no-cache,E2E,stream01,0.7762372466418875,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,LoD/RR no-cache,E2E,stream02,0.7785003482795614,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,LoD/RR no-cache,E2E,stream03,0.7801372326018922,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,LoD/RR no-cache,Decode,stream00,0.6319999782079558,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,LoD/RR no-cache,Decode,stream01,0.6315621521608176,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,LoD/RR no-cache,Decode,stream02,0.6344347430980735,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,LoD/RR no-cache,Decode,stream03,0.6390114909319082,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,RR-LRU,E2E,stream00,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,RR-LRU,E2E,stream01,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,RR-LRU,E2E,stream02,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,RR-LRU,E2E,stream03,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,RR-LRU,Decode,stream00,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,RR-LRU,Decode,stream01,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,RR-LRU,Decode,stream02,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,RR-LRU,Decode,stream03,1.0,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,EPLB-like,E2E,stream00,0.978858304652466,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,EPLB-like,E2E,stream01,0.9740323168177766,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,EPLB-like,E2E,stream02,0.9805403673032852,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,EPLB-like,E2E,stream03,0.9762565320671958,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,EPLB-like,Decode,stream00,0.984741880625753,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,EPLB-like,Decode,stream01,0.9805661975613139,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,EPLB-like,Decode,stream02,0.9771256085114252,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,EPLB-like,Decode,stream03,0.9715110037032818,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,Prism/DanceMoE static,E2E,stream00,1.0279504265993795,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,Prism/DanceMoE static,E2E,stream01,1.0191743941648945,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,Prism/DanceMoE static,E2E,stream02,1.0330356133600647,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,Prism/DanceMoE static,E2E,stream03,1.0291159023592193,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,Prism/DanceMoE static,Decode,stream00,0.9850774184268667,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,Prism/DanceMoE static,Decode,stream01,0.9725112234448773,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,Prism/DanceMoE static,Decode,stream02,0.9900978631315727,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,Prism/DanceMoE static,Decode,stream03,0.9932290434852847,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,Static-hot cache,E2E,stream00,1.012252787883881,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,Static-hot cache,E2E,stream01,1.0158162152042742,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,Static-hot cache,E2E,stream02,1.0218789350162152,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,Static-hot cache,E2E,stream03,1.0143546443131646,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,Static-hot cache,Decode,stream00,0.9820260916353256,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,Static-hot cache,Decode,stream01,0.9878810454798321,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,Static-hot cache,Decode,stream02,0.995428283518495,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,Static-hot cache,Decode,stream03,0.993342535157985,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,MoE-Infinity-style,E2E,stream00,0.7427719698294006,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,MoE-Infinity-style,E2E,stream01,0.7505640072306902,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,MoE-Infinity-style,E2E,stream02,0.763364710379104,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,MoE-Infinity-style,E2E,stream03,0.7462197135917038,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,MoE-Infinity-style,Decode,stream00,0.5741130710252045,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,MoE-Infinity-style,Decode,stream01,0.582735691347707,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,MoE-Infinity-style,Decode,stream02,0.5966554290538225,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,MoE-Infinity-style,Decode,stream03,0.58249626274746,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,SPARSE,E2E,stream00,1.1728765890084327,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,SPARSE,E2E,stream01,1.1735608612723392,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,SPARSE,E2E,stream02,1.1801514970755096,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,SPARSE,E2E,stream03,1.1685334646873946,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,SPARSE,Decode,stream00,1.3366828508394337,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,SPARSE,Decode,stream01,1.3416400051790365,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,SPARSE,Decode,stream02,1.3508516979268308,"same-workload, same-slice RR-LRU",4,3
+"Qwen, 400 Mbit/s",b4/p512/n128 decode-heavy,SPARSE,Decode,stream03,1.3369471968209288,"same-workload, same-slice RR-LRU",4,3

@@ -1,0 +1,13 @@
+method,metric,gain_mean_pct,gain_slice_sd_pct,request_slices,repeats_per_slice,epipe_scope
+SCP-only,E2E,1.7676474197643788,0.3995690477072324,4,3,decode residual scan for EPIPE-enabled cases
+SCP-only,Decode,-0.7793072545798585,0.9655193938357822,4,3,decode residual scan for EPIPE-enabled cases
+RS-only,E2E,7.536324846887027,0.9114237533204756,4,3,decode residual scan for EPIPE-enabled cases
+RS-only,Decode,16.56389408888422,2.0049667023357856,4,3,decode residual scan for EPIPE-enabled cases
+EPIPE-only,E2E,8.698670488830818,0.280648559221466,4,3,decode residual scan for EPIPE-enabled cases
+EPIPE-only,Decode,19.069758355369043,0.7034316003600728,4,3,decode residual scan for EPIPE-enabled cases
+SCP+RS,E2E,9.867169465564396,0.5616507468552911,4,3,decode residual scan for EPIPE-enabled cases
+SCP+RS,Decode,16.034647387400863,1.0891017173219883,4,3,decode residual scan for EPIPE-enabled cases
+RS+EPIPE,E2E,14.648392457071091,0.3230677992295916,4,3,decode residual scan for EPIPE-enabled cases
+RS+EPIPE,Decode,34.537034024211096,0.6418146704589893,4,3,decode residual scan for EPIPE-enabled cases
+SPARSE,E2E,17.378060301091903,0.4795354679854233,4,3,decode residual scan for EPIPE-enabled cases
+SPARSE,Decode,34.153043769155744,0.6618234723728187,4,3,decode residual scan for EPIPE-enabled cases

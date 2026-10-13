@@ -1,0 +1,13 @@
+model,network,workload,e2e_gain_vs_rr_pct,decode_gain_vs_rr_pct,protocol,cache_by_rank
+DeepSeek,native,b1,12.81899548783192,24.46670031612783,physical heterogeneous 2x2080Ti + 2x2080SUPER,"8,8,4,4"
+DeepSeek,native,b2,26.465768085889163,43.660042614254024,physical heterogeneous 2x2080Ti + 2x2080SUPER,"8,8,4,4"
+DeepSeek,native,b4,36.19640818021386,52.413584448982675,physical heterogeneous 2x2080Ti + 2x2080SUPER,"8,8,4,4"
+DeepSeek,tc400,b1,7.26719415702981,-0.05290871986092238,physical heterogeneous 2x2080Ti + 2x2080SUPER,"8,8,4,4"
+DeepSeek,tc400,b2,14.278887923544747,23.779792279522116,physical heterogeneous 2x2080Ti + 2x2080SUPER,"8,8,4,4"
+DeepSeek,tc400,b4,26.324008151814304,45.672860444871375,physical heterogeneous 2x2080Ti + 2x2080SUPER,"8,8,4,4"
+Qwen,native,b1,-9.275691920320007,-8.9266304347826,physical heterogeneous 2x2080Ti + 2x2080SUPER,"8,8,5,5"
+Qwen,native,b2,4.336012464610772,5.3306622455558506,physical heterogeneous 2x2080Ti + 2x2080SUPER,"8,8,5,5"
+Qwen,native,b4,11.154910178929756,14.641258943349289,physical heterogeneous 2x2080Ti + 2x2080SUPER,"8,8,5,5"
+Qwen,tc400,b1,-0.45738679676780025,-12.70915289798059,physical heterogeneous 2x2080Ti + 2x2080SUPER,"8,8,5,5"
+Qwen,tc400,b2,1.5897287179352126,0.570057005700586,physical heterogeneous 2x2080Ti + 2x2080SUPER,"8,8,5,5"
+Qwen,tc400,b4,1.4992730797189324,0.4199758146223642,physical heterogeneous 2x2080Ti + 2x2080SUPER,"8,8,5,5"
