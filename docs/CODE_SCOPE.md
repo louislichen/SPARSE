@@ -28,3 +28,9 @@ CPU tests, private infrastructure strings, and accidentally included binary
 files. It does not verify CUDA execution or the complete offline pipeline.
 Training tests require PyTorch and otherwise report skips. The missing SCP
 cache-replay dependency is documented in `REPRODUCIBILITY.md`.
+
+`utils/promoe.py` and the `*_promoe.sh` workflows are a new, independent
+ProMoE-style baseline. The serving core has default-off integration hooks;
+these do not imply new historical experimental results. Its mechanism mapping,
+CPU validation, and remaining CUDA/fidelity checks are documented in
+[`PROMOE_BASELINE.md`](PROMOE_BASELINE.md).

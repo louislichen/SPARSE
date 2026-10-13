@@ -498,6 +498,9 @@ def _train_one_pair(
             num_hidden_layers=int(args.num_hidden_layers),
             dropout=float(args.dropout),
         ).to(device)
+    elif str(args.model_arch) == "promoe":
+        from utils.promoe import ProMoEPredictor
+        model = ProMoEPredictor(input_dim, num_experts, int(args.hidden_dim)).to(device)
     else:
         model = RoutingScoutMLP(
             input_dim=input_dim,
@@ -568,7 +571,8 @@ def _train_one_pair(
     ckpt_path = output_dir / f"rs_l{target_layer}_inL{source_layer}.pth"
     if rank == 0:
         payload = {
-            "model_type": "next_layer_residual_logits_rs" if str(args.model_arch) == "residual" else "independent_light_logits_rs",
+            "model_type": {"residual": "next_layer_residual_logits_rs",
+                "mlp": "independent_light_logits_rs", "promoe": "promoe_style_mlp"}[str(args.model_arch)],
             "task": "router_prob",
             "state_dict": model.state_dict(),
             "input_dim": int(input_dim),
@@ -581,6 +585,7 @@ def _train_one_pair(
             "top_k": int(I.shape[1]),
             "label_type": "next_layer_true_router_topk_multihot",
             "feature_mode": str(args.feature_mode),
+            "feature_source": str(getattr(args, "profile_feature_source", "gate_input")),
             "target_distribution": str(args.target_mode),
             "loss_mode": str(args.loss_mode),
             "bce_weight": float(args.bce_weight),
@@ -611,7 +616,7 @@ def main() -> None:
     ap.add_argument("--profile-base-dir", required=True)
     ap.add_argument("--output-dir", required=True)
     ap.add_argument("--lead-layers", type=int, default=1)
-    ap.add_argument("--model-arch", type=str, default="mlp", choices=["mlp", "residual"])
+    ap.add_argument("--model-arch", type=str, default="mlp", choices=["mlp", "residual", "promoe"])
     ap.add_argument("--hidden-dim", type=int, default=512)
     ap.add_argument("--num-hidden-layers", type=int, default=3)
     ap.add_argument("--dropout", type=float, default=0.05)
@@ -661,9 +666,16 @@ def main() -> None:
         output_dir.mkdir(parents=True, exist_ok=True)
 
     manifest = _load_manifest(args.profile_base_dir)
+    args.profile_feature_source = str(manifest.get("feature_source", "gate_input"))
+    if args.model_arch == "promoe" and (args.profile_feature_source != "decoder_input" or args.feature_mode != "hidden"):
+        raise ValueError("ProMoE-style requires a decoder_input profile and hidden features")
+    if args.model_arch != "promoe" and args.profile_feature_source != "gate_input":
+        raise ValueError("RS runtime requires gate_input profiles; decoder inputs are reserved for ProMoE-style")
     rs_dir = _resolve_profile_subdir(args.profile_base_dir, manifest.get("rs_chunk_dir", ""), "rs_decode_chunks")
     num_layers = int(manifest["num_layers"])
     lead = int(args.lead_layers)
+    if lead < 1:
+        raise ValueError("--lead-layers must be positive")
     end_src = int(args.end_source_layer) if int(args.end_source_layer) >= 0 else num_layers - lead
     moe_layers = set(int(l) for l in manifest.get("moe_layer_indices", range(num_layers)))
     source_layers = [
@@ -671,7 +683,7 @@ def main() -> None:
         if l in moe_layers and l + lead in moe_layers
     ]
     if not source_layers:
-        raise ValueError("No adjacent MoE-layer pairs in the requested range")
+        raise ValueError("No MoE-layer pairs at the requested prediction distance")
 
     if rank == 0:
         with open(output_dir / "train_config.json", "w", encoding="utf-8") as f:

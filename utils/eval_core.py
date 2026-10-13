@@ -2338,6 +2338,7 @@ class Metrics:
 
 # ---------------- routing cache + stats ----------------
 class SparseContext:
+    promoe_runtime: Any = None
     num_layers: int = 0
     num_experts: int = 0
     routing_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]] = {}
@@ -2439,6 +2440,9 @@ class SparseContext:
 
     @classmethod
     def initialize(cls, num_layers: int, rs_group: int = 3, num_experts: int = 0) -> None:
+        if cls.promoe_runtime is not None:
+            cls.promoe_runtime.close()
+            cls.promoe_runtime = None
         cls.num_layers = int(num_layers)
         cls.num_experts = int(num_experts)
         cls.rs_group = int(rs_group)
@@ -3082,6 +3086,8 @@ class SparseContext:
         cls.logical_ngd_ep_reuse_once = False
         cls.current_phase = "none"
         cls.current_moe_layer_idx = None
+        if cls.promoe_runtime is not None:
+            cls.promoe_runtime.reset(clear_cache=bool(clear_expert_cache))
         for _, blk in list(cls.layer_blocks.items()):
             reset_fn = getattr(blk, "reset_runtime_state_for_new_request", None)
             if callable(reset_fn):
@@ -4600,8 +4606,8 @@ class DistributedSparseMoeBlock(nn.Module):
             raise ValueError(f"placement_mode must be scp|scp_ep|round_robin|weighted_random_balanced, got {self.placement_mode}")
 
         self.planner_mode = str(planner_mode)
-        if self.planner_mode not in ("none", "rs_prefetch"):
-            raise ValueError(f"planner_mode must be none|rs_prefetch, got {self.planner_mode}")
+        if self.planner_mode not in ("none", "rs_prefetch", "promoe"):
+            raise ValueError(f"planner_mode must be none|rs_prefetch|promoe, got {self.planner_mode}")
 
         self.expert_source = str(expert_source)
         if self.expert_source not in ("router", "rs"):
@@ -11603,6 +11609,8 @@ class DistributedSparseMoeBlock(nn.Module):
             return
 
     def _get_local_fused(self, eid: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        if self.planner_mode == "promoe":
+            return SparseContext.promoe_runtime.prefetcher.acquire(self.layer_idx, int(eid))
         if self.oracle_mode == "replay":
             oracle_payload = self._oracle_gpu_fused.get(int(eid), None)
             if oracle_payload is not None:
@@ -11655,6 +11663,8 @@ class DistributedSparseMoeBlock(nn.Module):
         return gate_up, down
 
     def _get_local_module_weights(self, eid: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        if self.planner_mode == "promoe":
+            return SparseContext.promoe_runtime.prefetcher.acquire(self.layer_idx, int(eid))
         if self.oracle_mode == "replay":
             oracle_payload = self._oracle_gpu_module.get(int(eid), None)
             if oracle_payload is not None:
@@ -13415,6 +13425,8 @@ class DistributedSparseMoeBlock(nn.Module):
         - process contiguous expert-id segments
         - avoid per-expert full-length boolean mask scans
         """
+        if self.planner_mode == "promoe" or _env_flag("SPARSE_PROMOE_EXECUTOR_CONTROL", "0"):
+            return self._execute_promoe_recv_groups(recv_hidden, recv_i, recv_w)
         if recv_i.numel() == 0:
             return torch.zeros_like(recv_hidden)
 
@@ -13614,6 +13626,46 @@ class DistributedSparseMoeBlock(nn.Module):
                 int(self.layer_idx),
                 {"expert_compute_ms": float(cp_compute_ms)},
             )
+        return out
+
+    def _execute_promoe_recv_groups(self, recv_hidden, recv_i, recv_w):
+        """Same sorted-segment arithmetic, independent ProMoE copy/ordering policy."""
+        prefetcher = SparseContext.promoe_runtime.prefetcher if self.planner_mode == "promoe" else None
+        order = torch.argsort(recv_i)
+        sorted_ids = recv_i[order]
+        ids, counts = torch.unique_consecutive(sorted_ids, return_counts=True)
+        ids, counts = ids.tolist(), counts.tolist()
+        segments = {}
+        offset = 0
+        for eid, count in zip(ids, counts):
+            segments[int(eid)] = (offset, offset + count)
+            offset += count
+        execution_order = ids
+        if prefetcher is not None:
+            with prefetcher.cv:
+                entries = prefetcher.layers[self.layer_idx].entries
+                ready_ids = {eid for eid in ids if eid in entries
+                    and entries[eid].ready_chunks == len(entries[eid].payload)}
+                execution_order = prefetcher.precise(self.layer_idx, ids, int(SparseContext.runtime_call_id))
+            if self.metrics is not None:
+                for eid in ids:
+                    self._record_cache_hit() if eid in ready_ids else self._record_cache_miss()
+        out_sorted = torch.zeros_like(recv_hidden)
+        hidden_sorted, w_sorted = recv_hidden[order], recv_w[order]
+        for eid in execution_order:
+            start, end = segments[eid]
+            try:
+                y, _ = self._plain_ep_compute_segment(
+                    eid=eid, cur=hidden_sorted[start:end], cur_w=w_sorted[start:end].unsqueeze(1),
+                    eid_is_local=True, allow_nonlocal=False)
+                out_sorted[start:end] = y
+            finally:
+                if prefetcher is not None:
+                    entry = prefetcher.layers[self.layer_idx].entries.get(eid)
+                    if entry is not None and entry.leased:
+                        prefetcher.release(self.layer_idx, eid)
+        out = torch.zeros_like(recv_hidden)
+        out[order] = out_sorted
         return out
 
     def _execute_local_rank_grouped_packets(
@@ -14935,7 +14987,12 @@ class DistributedSparseMoeBlock(nn.Module):
     def _experts_world1_exact(self, x: torch.Tensor, idx: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
         T = int(x.shape[0])
         H = int(x.shape[1])
-        final = torch.zeros((T, hidden_dim), device=x.device, dtype=x.dtype)
+        if self.planner_mode == "promoe" or _env_flag("SPARSE_PROMOE_EXECUTOR_CONTROL", "0"):
+            k = int(idx.shape[1])
+            routed = self._execute_promoe_recv_groups(x.repeat_interleave(k, dim=0),
+                idx.reshape(-1), w.reshape(-1))
+            return routed.reshape(T, k, H).sum(dim=1)
+        final = torch.zeros((T, H), device=x.device, dtype=x.dtype)
         expert_mask = F.one_hot(idx.to(torch.long), num_classes=self.num_experts).permute(2, 1, 0)
         for expert_idx in range(self.num_experts):
             idx_k, top_x = torch.where(expert_mask[expert_idx])
@@ -16681,6 +16738,8 @@ class DistributedSparseMoeBlock(nn.Module):
         group_end = min(g + self.rs_group, self.num_layers)
         SparseContext.current_moe_layer_idx = int(self.layer_idx)
         physical_comm_trace_state = self._physical_moe_comm_trace_begin()
+        if self.planner_mode == "promoe":
+            SparseContext.promoe_runtime.prefetcher.begin_step(int(SparseContext.runtime_call_id))
 
         owner_local_batch = bool(getattr(self, "_sparse_local_owner_batch", False))
         if owner_local_batch:
@@ -17995,6 +18054,17 @@ class ModelBundle:
 
 
 def build_model_and_tokenizer(cfg: CoreBuildConfig, env: DistEnv, metrics=None) -> ModelBundle:
+    if cfg.planner_mode == "promoe":
+        if (cfg.placement_mode != "round_robin" or cfg.routing_mode != "router"
+                or cfg.expert_source != "router" or cfg.cache_policy != "lru"
+                or cfg.expert_offload != "cpu" or cfg.oracle_mode != "none" or cfg.enable_skvs):
+            raise ValueError("ProMoE-style requires RR ownership, original router, CPU offload, LRU, and no oracle/SKVS")
+        incompatible = ("SPARSE_EPIPE_ENABLE", "SPARSE_EPIPE_PREFILL_ENABLE",
+            "SPARSE_RS_TWO_STAGE", "SPARSE_MOE_INFINITY_POLICY", "SPARSE_HOTPIN_ENABLE",
+            "SPARSE_NODE_GROUPED_DISPATCH", "SPARSE_RANK_GROUPED_DISPATCH",
+            "SPARSE_ERS_ENABLE", "SPARSE_NODEPATCH_ENABLE", "SPARSE_GLOBAL_EXPERT_CACHE")
+        if any(_env_flag(key, "0") for key in incompatible):
+            raise ValueError("Disable SPARSE-specific placement/prefetch/execution extensions for ProMoE-style")
     dtype = torch.float16 if cfg.dtype == "float16" else torch.bfloat16
     topology = build_dist_topology(
         env,
@@ -18237,6 +18307,15 @@ def build_model_and_tokenizer(cfg: CoreBuildConfig, env: DistEnv, metrics=None) 
 
         gc.collect()
         torch.cuda.empty_cache()
+
+    if cfg.planner_mode == "promoe":
+        from utils.promoe import ProMoERuntime, register_prediction_hooks
+        SparseContext.promoe_runtime = ProMoERuntime(SparseContext.layer_blocks,
+            os.environ.get("SPARSE_PROMOE_DIR", ""),
+            distance=int(os.environ.get("SPARSE_PROMOE_DISTANCE", "2")),
+            predict_prefill=_env_flag("SPARSE_PROMOE_PREDICT_PREFILL", "0"))
+        register_prediction_hooks(model.model.layers, SparseContext.promoe_runtime,
+            lambda: (int(SparseContext.runtime_call_id), str(SparseContext.current_phase)))
 
     model.model.embed_tokens = model.model.embed_tokens.to(env.device, dtype=dtype)
     model.model.norm = model.model.norm.to(env.device, dtype=dtype)
@@ -18716,6 +18795,8 @@ def greedy_decode_profiled(model, input_ids, attention_mask, max_new_tokens: int
                 use_cache=True,
                 return_dict=True,
             )
+        if SparseContext.promoe_runtime is not None:
+            SparseContext.promoe_runtime.drain()
         if measure_ttft:
             torch.cuda.synchronize(env.device)
     _phase_trace("PREFILL_END")
@@ -18789,6 +18870,8 @@ def greedy_decode_profiled(model, input_ids, attention_mask, max_new_tokens: int
                 past_key_values=past,
                 return_dict=True,
             )
+            if SparseContext.promoe_runtime is not None:
+                SparseContext.promoe_runtime.drain()
         _phase_trace(f"DECODE_STEP_END step={call_id}")
         SparseContext.clear_oracle_runtime_active()
         SparseContext.end_oracle_call()

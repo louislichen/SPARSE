@@ -36,6 +36,13 @@ EPIPE control. Deprecated routing-repair, sparse-attention, simulated weak-link,
 and simulated-heterogeneity experiments are not exposed by the public
 launchers and are forced off in every formal command.
 
+An additional [ProMoE-style baseline](docs/PROMOE_BASELINE.md) is implemented
+with CPU stride prediction, projection-chunk prefetching, precise-demand
+preemption, and cache-aware expert reordering under the same EP harness.
+`scripts/run/run_promoe.sh` provides `promoe-style` and `rr-matched` paths for
+an explicitly configured topology. This new Python adaptation is separate
+from the frozen paper results; CUDA performance validation is pending.
+
 ## Repository Layout
 
 ```text

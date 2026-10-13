@@ -559,6 +559,8 @@ def _clear_all_runtime_state_for_perf() -> None:
                 demote_hot=demote_hot,
             )
         except Exception:
+            if SparseContext.promoe_runtime is not None:
+                raise
             SparseContext.reset()
     else:
         SparseContext.reset()
@@ -2130,6 +2132,14 @@ def reduce_and_build_perf_record(metrics: Metrics, args, env: DistEnv, num_exper
         except Exception:
             continue
 
+    promoe_stats_by_rank = []
+    if SparseContext.promoe_runtime is not None:
+        local_promoe_stats = SparseContext.promoe_runtime.summary()
+        if dist.is_initialized():
+            promoe_stats_by_rank = [None] * env.world
+            dist.all_gather_object(promoe_stats_by_rank, local_promoe_stats)
+        else:
+            promoe_stats_by_rank = [local_promoe_stats]
     sim_config = _sim_config_summary(env.world)
     per_node_breakdown = _build_per_node_breakdown(gathered_rank_breakdown or [], sim_config["sim_node_map"])
     weaknet_pair_event_counts = _merge_counter_dicts(gathered_rank_breakdown or [], "weaknet_inter_node_pair_event_counts")
@@ -2254,6 +2264,10 @@ def reduce_and_build_perf_record(metrics: Metrics, args, env: DistEnv, num_exper
         "clear_expert_cache_each_repeat": int(str(os.environ.get("SPARSE_CLEAR_EXPERT_CACHE_EACH_REPEAT", "0")).strip().lower() in ("1", "true", "yes", "on")),
         "demote_hot_cache_each_repeat": int(str(os.environ.get("SPARSE_DEMOTE_HOT_CACHE_EACH_REPEAT", "0")).strip().lower() in ("1", "true", "yes", "on")),
         "planner_mode": args.planner_mode,
+        "predictive_baseline": "promoe-style-python-ep" if args.planner_mode == "promoe" else "",
+        "promoe_executor_control": int(_env_flag("SPARSE_PROMOE_EXECUTOR_CONTROL", "0")),
+        "promoe_distance": int(os.environ.get("SPARSE_PROMOE_DISTANCE", "2")) if args.planner_mode == "promoe" else 0,
+        "promoe_stats_by_rank": promoe_stats_by_rank,
         "runtime_mode": runtime_mode,
         "ep_size": int(ep_size),
         "dp_size": int(dp_size),
@@ -3407,6 +3421,8 @@ def aggregate_repeat_records(records: List[Dict[str, Any]], args) -> Dict[str, A
         and summary["repeat_h2d_demand_mb_slope"] > 0.0
     )
     summary["raw_repeats"] = records
+    if base.get("predictive_baseline"):
+        summary["promoe_stats_by_repeat"] = [r.get("promoe_stats_by_rank", []) for r in records]
     return summary
 
 
@@ -3720,7 +3736,7 @@ def main() -> None:
     ap.add_argument("--sdpa-mem-efficient", action="store_true")
     ap.add_argument("--sdpa-math", action="store_true")
 
-    ap.add_argument("--planner-mode", type=str, default="none", choices=["none", "rs_prefetch"])
+    ap.add_argument("--planner-mode", type=str, default="none", choices=["none", "rs_prefetch", "promoe"])
     ap.add_argument("--expert-source", type=str, default="router", choices=["router", "rs"])
     ap.add_argument("--prefetch-top-m", type=int, default=4)
     ap.add_argument("--rs-group", type=int, default=3)
@@ -4012,6 +4028,9 @@ def main() -> None:
     if profile_path:
         print(f"[SCP-EP profile] rank={env.rank} wrote {profile_path}", flush=True)
     barrier(env)
+    if SparseContext.promoe_runtime is not None:
+        SparseContext.promoe_runtime.close()
+        SparseContext.promoe_runtime = None
     destroy_dist()
 
 
