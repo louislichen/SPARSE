@@ -11,7 +11,7 @@ fi
 source "${ENV_FILE}"
 
 RUN_ID="${RUN_ID:-paper-main-$(date '+%Y%m%d-%H%M%S')}"
-METHODS="${METHODS:-rr lod eplb prism static-hot moe-infinity sparse}"
+METHODS="${METHODS:-sparse}"
 WORKLOADS="${WORKLOADS:-b1 b2 b4}"
 REQUEST_GROUPS="${REQUEST_GROUPS:-0 1 2 3}"
 export RUN_ID ENV_FILE

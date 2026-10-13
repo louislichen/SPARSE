@@ -559,8 +559,6 @@ def _clear_all_runtime_state_for_perf() -> None:
                 demote_hot=demote_hot,
             )
         except Exception:
-            if SparseContext.promoe_runtime is not None:
-                raise
             SparseContext.reset()
     else:
         SparseContext.reset()
@@ -1088,12 +1086,8 @@ def reduce_and_build_perf_record(metrics: Metrics, args, env: DistEnv, num_exper
     rs_prefetch_target_resolver_mismatch_count = t(getattr(metrics, "rs_prefetch_target_resolver_mismatch_count", 0), torch.long)
     rs_prefetch_would_be_wrong_without_resolver_count = t(getattr(metrics, "rs_prefetch_would_be_wrong_without_resolver_count", 0), torch.long)
     rs_scp_target_mismatch_count = t(getattr(metrics, "rs_scp_target_mismatch_count", 0), torch.long)
-    hotpin_hits = t(getattr(metrics, "hotpin_hits", 0), torch.long)
-    hotpin_misses = t(getattr(metrics, "hotpin_misses", 0), torch.long)
-    hotpin_prevented_evictions = t(getattr(metrics, "hotpin_prevented_evictions", 0), torch.long)
     ttl_prevented_evictions = t(getattr(metrics, "ttl_prevented_evictions", 0), torch.long)
     cache_eviction_fallback_all_protected = t(getattr(metrics, "cache_eviction_fallback_all_protected", 0), torch.long)
-    moe_infinity_demand_eviction_count = t(getattr(metrics, "moe_infinity_demand_eviction_count", 0), torch.long)
     warmup_loaded_experts = t(getattr(metrics, "warmup_loaded_experts", 0), torch.long)
     warmup_skipped_resident = t(getattr(metrics, "warmup_skipped_resident", 0), torch.long)
     warmup_h2d = t(getattr(metrics, "warmup_h2d_bytes", 0), torch.long)
@@ -1549,12 +1543,8 @@ def reduce_and_build_perf_record(metrics: Metrics, args, env: DistEnv, num_exper
     all_reduce_sum_(rs_prefetch_target_resolver_mismatch_count)
     all_reduce_sum_(rs_prefetch_would_be_wrong_without_resolver_count)
     all_reduce_sum_(rs_scp_target_mismatch_count)
-    all_reduce_sum_(hotpin_hits)
-    all_reduce_sum_(hotpin_misses)
-    all_reduce_sum_(hotpin_prevented_evictions)
     all_reduce_sum_(ttl_prevented_evictions)
     all_reduce_sum_(cache_eviction_fallback_all_protected)
-    all_reduce_sum_(moe_infinity_demand_eviction_count)
     all_reduce_sum_(warmup_loaded_experts)
     all_reduce_sum_(warmup_skipped_resident)
     all_reduce_sum_(warmup_h2d)
@@ -2132,14 +2122,6 @@ def reduce_and_build_perf_record(metrics: Metrics, args, env: DistEnv, num_exper
         except Exception:
             continue
 
-    promoe_stats_by_rank = []
-    if SparseContext.promoe_runtime is not None:
-        local_promoe_stats = SparseContext.promoe_runtime.summary()
-        if dist.is_initialized():
-            promoe_stats_by_rank = [None] * env.world
-            dist.all_gather_object(promoe_stats_by_rank, local_promoe_stats)
-        else:
-            promoe_stats_by_rank = [local_promoe_stats]
     sim_config = _sim_config_summary(env.world)
     per_node_breakdown = _build_per_node_breakdown(gathered_rank_breakdown or [], sim_config["sim_node_map"])
     weaknet_pair_event_counts = _merge_counter_dicts(gathered_rank_breakdown or [], "weaknet_inter_node_pair_event_counts")
@@ -2264,10 +2246,6 @@ def reduce_and_build_perf_record(metrics: Metrics, args, env: DistEnv, num_exper
         "clear_expert_cache_each_repeat": int(str(os.environ.get("SPARSE_CLEAR_EXPERT_CACHE_EACH_REPEAT", "0")).strip().lower() in ("1", "true", "yes", "on")),
         "demote_hot_cache_each_repeat": int(str(os.environ.get("SPARSE_DEMOTE_HOT_CACHE_EACH_REPEAT", "0")).strip().lower() in ("1", "true", "yes", "on")),
         "planner_mode": args.planner_mode,
-        "predictive_baseline": "promoe-style-python-ep" if args.planner_mode == "promoe" else "",
-        "promoe_executor_control": int(_env_flag("SPARSE_PROMOE_EXECUTOR_CONTROL", "0")),
-        "promoe_distance": int(os.environ.get("SPARSE_PROMOE_DISTANCE", "2")) if args.planner_mode == "promoe" else 0,
-        "promoe_stats_by_rank": promoe_stats_by_rank,
         "runtime_mode": runtime_mode,
         "ep_size": int(ep_size),
         "dp_size": int(dp_size),
@@ -2867,13 +2845,7 @@ def reduce_and_build_perf_record(metrics: Metrics, args, env: DistEnv, num_exper
         "prefetch_admission_rate": (
             float(prefetch_admitted_total_val) / max(float(rs_candidate_survived_count.item()), 1.0)
         ),
-        "hotpin_enable": int(os.environ.get("SPARSE_HOTPIN_ENABLE", "0").strip().lower() not in ("0", "false", "no", "off")),
-        "hotpin_profile_path": str(os.environ.get("SPARSE_HOTPIN_PROFILE_PATH", "")),
-        "hotpin_topk_per_layer": int(os.environ.get("SPARSE_HOTPIN_TOPK_PER_LAYER", "1") or 1),
         "cache_ttl_steps": int(os.environ.get("SPARSE_CACHE_TTL_STEPS", "0") or 0),
-        "hotpin_hits": int(hotpin_hits.item()),
-        "hotpin_misses": int(hotpin_misses.item()),
-        "hotpin_prevented_evictions": int(hotpin_prevented_evictions.item()),
         "ttl_prevented_evictions": int(ttl_prevented_evictions.item()),
         "cache_eviction_fallback_all_protected": int(cache_eviction_fallback_all_protected.item()),
         "prefill_decode_warmup": int(os.environ.get("SPARSE_PREFILL_DECODE_WARMUP", "0").strip().lower() not in ("0", "false", "no", "off")),
@@ -2895,14 +2867,6 @@ def reduce_and_build_perf_record(metrics: Metrics, args, env: DistEnv, num_exper
         "transition_prefetch_wasted": int(transition_prefetch_wasted.item()),
         "transition_safe_evict_denied": int(transition_safe_evict_denied.item()),
         "transition_no_replace_denied": int(transition_no_replace_denied.item()),
-        "moe_infinity_policy": int(os.environ.get("SPARSE_MOE_INFINITY_POLICY", "0").strip().lower() not in ("0", "false", "no", "off")),
-        "moe_infinity_eamc_path": str(os.environ.get("SPARSE_MOE_INFINITY_EAMC_PATH", "")),
-        "moe_infinity_window_layers": int(os.environ.get("SPARSE_MOE_INFINITY_WINDOW_LAYERS", "64") or 64),
-        "moe_infinity_layer_decay": float(os.environ.get("SPARSE_MOE_INFINITY_LAYER_DECAY", "0") or 0),
-        "moe_infinity_topk_per_layer": int(os.environ.get("SPARSE_MOE_INFINITY_TOPK_PER_LAYER", str(args.prefetch_top_m)) or args.prefetch_top_m),
-        "moe_infinity_history_size": int(os.environ.get("SPARSE_MOE_INFINITY_HISTORY_SIZE", "64") or 64),
-        "moe_infinity_priority_epsilon": float(os.environ.get("SPARSE_MOE_INFINITY_PRIORITY_EPSILON", "0.0001") or 0.0001),
-        "moe_infinity_demand_eviction_count": int(moe_infinity_demand_eviction_count.item()),
         "epipe_enable": int(os.environ.get("SPARSE_EPIPE_ENABLE", "0").strip().lower() not in ("0", "false", "no", "off")),
         "epipe_shadow": int(os.environ.get("SPARSE_EPIPE_SHADOW", "0").strip().lower() not in ("0", "false", "no", "off")),
         "epipe_mode": str(os.environ.get("SPARSE_EPIPE_MODE", "upfront_scan")),
@@ -3136,8 +3100,7 @@ def aggregate_repeat_records(records: List[Dict[str, Any]], args) -> Dict[str, A
         "prefetch_rejected_active_replace", "prefetch_rejected_margin", "prefetch_rejected_cache_full",
         "prefetch_rejected_low_score", "prefetch_admission_rate", "rs_prefetch_eval_precision", "rs_prefetch_eval_recall",
         "prefetch_admission_upper_recall", "prefetch_recall_gap_to_admission_upper",
-        "hotpin_enable", "hotpin_topk_per_layer", "cache_ttl_steps",
-        "hotpin_hits", "hotpin_misses", "hotpin_prevented_evictions",
+        "cache_ttl_steps",
         "ttl_prevented_evictions", "cache_eviction_fallback_all_protected",
         "prefill_decode_warmup", "warmup_topk_per_layer", "warmup_loaded_experts",
         "warmup_skipped_resident", "warmup_h2d_mb", "warmup_time_ms",
@@ -3145,8 +3108,6 @@ def aggregate_repeat_records(records: List[Dict[str, Any]], args) -> Dict[str, A
         "transition_lookup_calls", "transition_lookup_overhead_ms",
         "transition_prefetch_admitted", "transition_prefetch_hit", "transition_prefetch_late",
         "transition_prefetch_wasted", "transition_safe_evict_denied", "transition_no_replace_denied",
-        "moe_infinity_policy", "moe_infinity_window_layers", "moe_infinity_topk_per_layer",
-        "moe_infinity_priority_epsilon", "moe_infinity_demand_eviction_count",
         "epipe_enable", "epipe_shadow", "epipe_mode", "epipe_decode_rs_mode", "epipe_decode_with_rs_mode",
         "epipe_shadow_count", "epipe_enabled_count",
         "epipe_fallback_count", "epipe_fallback_no_ready", "epipe_fallback_no_missing",
@@ -3421,8 +3382,6 @@ def aggregate_repeat_records(records: List[Dict[str, Any]], args) -> Dict[str, A
         and summary["repeat_h2d_demand_mb_slope"] > 0.0
     )
     summary["raw_repeats"] = records
-    if base.get("predictive_baseline"):
-        summary["promoe_stats_by_repeat"] = [r.get("promoe_stats_by_rank", []) for r in records]
     return summary
 
 
@@ -3643,7 +3602,6 @@ def save_aggregated_perf(summary: Dict[str, Any], args) -> None:
         "prefetch_rejected_low_score", "prefetch_admission_rate",
         "prefetch_admission_upper_recall", "prefetch_admission_upper_recall_std",
         "prefetch_recall_gap_to_admission_upper", "prefetch_recall_gap_to_admission_upper_std",
-        "hotpin_enable", "hotpin_hits", "hotpin_misses", "hotpin_prevented_evictions",
         "ttl_prevented_evictions", "cache_eviction_fallback_all_protected",
         "prefill_decode_warmup", "warmup_loaded_experts", "warmup_skipped_resident",
         "warmup_h2d_mb", "warmup_time_ms",
@@ -3718,7 +3676,7 @@ def main() -> None:
 
     ap.add_argument("--expert-offload", type=str, default="cpu", choices=["cpu", "gpu"])
     ap.add_argument("--expert-cache", type=int, default=10)
-    ap.add_argument("--cache-policy", type=str, default="lru", choices=["lru", "lfu", "hotpin_lru", "hotpin_lru_ttl", "tiered"])
+    ap.add_argument("--cache-policy", type=str, default="lru", choices=["lru", "lfu", "tiered"])
 
     ap.add_argument("--debug-a2a-checks", action="store_true")
     ap.add_argument("--log-per-layer", action="store_true")
@@ -3736,7 +3694,7 @@ def main() -> None:
     ap.add_argument("--sdpa-mem-efficient", action="store_true")
     ap.add_argument("--sdpa-math", action="store_true")
 
-    ap.add_argument("--planner-mode", type=str, default="none", choices=["none", "rs_prefetch", "promoe"])
+    ap.add_argument("--planner-mode", type=str, default="none", choices=["none", "rs_prefetch"])
     ap.add_argument("--expert-source", type=str, default="router", choices=["router", "rs"])
     ap.add_argument("--prefetch-top-m", type=int, default=4)
     ap.add_argument("--rs-group", type=int, default=3)
@@ -4028,9 +3986,6 @@ def main() -> None:
     if profile_path:
         print(f"[SCP-EP profile] rank={env.rank} wrote {profile_path}", flush=True)
     barrier(env)
-    if SparseContext.promoe_runtime is not None:
-        SparseContext.promoe_runtime.close()
-        SparseContext.promoe_runtime = None
     destroy_dist()
 
 

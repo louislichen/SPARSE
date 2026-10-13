@@ -82,10 +82,10 @@ substantially shorter and is the preferred review workflow.
 
 ## Runtime Matrices
 
-Main controlled comparison:
+Full SPARSE runtime:
 
 ```bash
-METHODS='rr lod eplb prism static-hot moe-infinity sparse'
+METHODS='sparse'
 WORKLOADS='b1 b2 b4'
 REQUEST_GROUPS='0 1 2 3'
 ```

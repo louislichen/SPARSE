@@ -3,8 +3,8 @@
 ## What the Code Supports
 
 1. SPARSE runs without changing router-selected experts or combine weights.
-2. The main two-node matrix compares SPARSE and controlled baselines under
-   matched model, requests, network, cache capacity, and token accounting.
+2. The default two-node matrix runs full SPARSE. Component controls use matched
+   models, requests, network, cache capacity, and token accounting.
 3. The component matrix compares SCP, RS, EPIPE, and their combinations as
    system paths. EPIPE-enabled paths also change the executor; separate
    executor-matched launchers are provided for finer controls.
@@ -45,7 +45,8 @@ Expected output: one RR and one SPARSE summary on node 0, no NCCL timeout, and
 Use the frozen RS checkpoints and SCP placement, then run the main or ablation
 matrix from the README.
 The full duration depends strongly on GPU generation and host-to-device expert
-loading; reserve an overnight window for the complete 84-case main matrix.
+loading. The default matrix has 12 cases; component and executor controls add
+their own cases.
 
 ## Expected Files
 

@@ -12,18 +12,15 @@ tables, and fixed-canvas plotting code. It does not include model weights,
 datasets, RS checkpoints, SCP profiles, raw repeats, server logs, or private
 cluster configuration.
 
-## Supported Evaluation Paths
+## SPARSE Evaluation Paths
 
-The public runtime exposes the following controlled methods:
+The public runtime includes SPARSE, its component ablations, and the shared
+round-robin reference needed for those controls. Comparison-system implementations
+are kept in a separate local experiment workspace and are not part of this release.
 
 | CLI name | Paper meaning |
 |---|---|
 | `rr` | Round-robin ownership with reactive LRU caching |
-| `lod` | No-cache demand-loading diagnostic |
-| `eplb` | EPLB-like static placement |
-| `prism` | Prism/DanceMoE-style static placement |
-| `static-hot` | Static hot-expert cache policy |
-| `moe-infinity` | MoE-Infinity-style proactive offloading policy |
 | `scp` | SCP only |
 | `rs` | RS only |
 | `epipe` | EPIPE execution path only |
@@ -35,13 +32,6 @@ The public runtime exposes the following controlled methods:
 EPIPE control. Deprecated routing-repair, sparse-attention, simulated weak-link,
 and simulated-heterogeneity experiments are not exposed by the public
 launchers and are forced off in every formal command.
-
-An additional [ProMoE-style baseline](docs/PROMOE_BASELINE.md) is implemented
-with CPU stride prediction, projection-chunk prefetching, precise-demand
-preemption, and cache-aware expert reordering under the same EP harness.
-`scripts/run/run_promoe.sh` provides `promoe-style` and `rr-matched` paths for
-an explicitly configured topology. This new Python adaptation is separate
-from the frozen paper results; CUDA performance validation is pending.
 
 ## Repository Layout
 
@@ -163,8 +153,8 @@ The formal launchers never inject simulated communication or compute delays.
 
 ## 6. Run the Two-Node Matrix
 
-The default matrix evaluates the seven methods in the main Qwen figure over
-three request shapes and four non-overlapping input groups. Each configuration
+The default matrix evaluates full SPARSE over three request shapes and four
+non-overlapping input groups. Each configuration
 uses one warm-up and three measured repeats.
 
 ```bash

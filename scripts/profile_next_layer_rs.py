@@ -289,7 +289,6 @@ class NextLayerRSProfiler:
 
     def _register_gate_hooks(self) -> None:
         hook_count = 0
-        self.decoder_inputs = {}
         for layer_idx, layer in enumerate(self.model.model.layers):
             mlp = getattr(layer, "mlp", None)
             gate = getattr(mlp, "gate", None)
@@ -297,8 +296,6 @@ class NextLayerRSProfiler:
             if gate is None or experts is None:
                 continue
             gate.register_forward_hook(self._make_gate_hook(layer_idx, mlp))
-            if self.args.feature_source == "decoder_input":
-                layer.register_forward_pre_hook(self._make_decoder_hook(layer_idx), with_kwargs=True)
             self.moe_layer_indices.append(int(layer_idx))
             self.moe_layer_set.add(int(layer_idx))
             hook_count += 1
@@ -309,22 +306,11 @@ class NextLayerRSProfiler:
             flush=True,
         )
 
-    def _make_decoder_hook(self, layer_idx: int):
-        def hook_fn(module, hook_args, hook_kwargs):
-            if self.capture_enabled:
-                hidden = hook_args[0] if hook_args else hook_kwargs.get("hidden_states")
-                if hidden is None:
-                    raise RuntimeError("Decoder input hidden states are missing")
-                self.decoder_inputs[layer_idx] = hidden.detach()
-        return hook_fn
-
     def _make_gate_hook(self, layer_idx: int, mlp_module):
         def hook_fn(module, hook_args, output):
             if not self.capture_enabled:
                 return
             hidden_in = hook_args[0] if len(hook_args) > 0 else None
-            if self.args.feature_source == "decoder_input":
-                hidden_in = self.decoder_inputs.pop(layer_idx, None)
             if hidden_in is None or output is None:
                 return
 
@@ -584,7 +570,6 @@ class NextLayerRSProfiler:
             "profile_batch_size": int(self.args.profile_batch_size),
             "total_decode_records": int(self.total_records),
             "save_router_logits": bool(self.args.save_router_logits),
-            "feature_source": str(self.args.feature_source),
             "schema": "next_layer_rs_v1",
             "moe_layer_indices": list(self.moe_layer_indices),
             "rs_chunk_dir": str(self.chunk_dir),
@@ -622,8 +607,7 @@ class NextLayerRSProfiler:
             "decode_token_source": str(self.args.decode_token_source),
             "total_decode_records": int(self.total_records),
             "moe_layer_indices": list(self.moe_layer_indices),
-            "feature_source": str(self.args.feature_source),
-            "input_file_semantics": "rs_inputs_l{l}: " + self.args.feature_source + " hidden for layer l, shape [N,H], fp16",
+            "input_file_semantics": "rs_inputs_l{l}: gate input hidden for layer l, shape [N,H], fp16",
             "label_file_semantics": "rs_labels_l{l}: true router top-k for layer l, indices [N,K], weights [N,K]",
             "next_layer_training_semantics": "train source layer s inputs against target layer s+lead labels",
         }
@@ -646,8 +630,6 @@ def main() -> None:
     ap.add_argument("--max-scan-samples", type=int, default=0)
     ap.add_argument("--save-interval-records", type=int, default=4096)
     ap.add_argument("--save-router-logits", action="store_true")
-    ap.add_argument("--feature-source", choices=["gate_input", "decoder_input"], default="gate_input",
-                    help="RS uses gate input; ProMoE-style uses the pre-attention decoder input.")
     ap.add_argument("--device-map", type=str, default="auto")
     ap.add_argument("--max-memory-per-gpu", type=str, default="9GiB")
     ap.add_argument("--max-memory-cpu", type=str, default="80GiB")

@@ -22,7 +22,7 @@ done
 RUN_ID="${RUN_ID:-paper-main-$(date '+%Y%m%d-%H%M%S')}"
 SESSION="${SESSION:-sparse-${RUN_ID}}"
 RUN_COMMAND="${RUN_COMMAND:-bash scripts/run/run_matrix.sh}"
-METHODS_VALUE="${METHODS:-rr lod eplb prism static-hot moe-infinity sparse}"
+METHODS_VALUE="${METHODS:-sparse}"
 WORKLOADS_VALUE="${WORKLOADS:-b1 b2 b4}"
 REQUEST_GROUPS_VALUE="${REQUEST_GROUPS:-0 1 2 3}"
 for value in "${METHODS_VALUE}" "${WORKLOADS_VALUE}" "${REQUEST_GROUPS_VALUE}" "${RUN_COMMAND}"; do

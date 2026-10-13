@@ -20,7 +20,7 @@ usage() {
 Usage: run_case.sh METHOD WORKLOAD REQUEST_GROUP
 
 Methods:
-  rr, lod, eplb, prism, static-hot, moe-infinity
+  rr
   scp, rs, epipe, scp-rs, rs-epipe, sparse
   executor-no-epipe, executor-with-epipe
 
@@ -81,36 +81,9 @@ SCP_PREFILL=0
 EPIPE_ENABLE=0
 EPIPE_RS_MODE=off
 PLAIN_EXEC=unique_mask
-HOTPIN_ENABLE=0
-MOE_INFINITY_ENABLE=0
 
 case "${METHOD}" in
   rr) ;;
-  lod)
-    EXPERT_CACHE_CURRENT=0
-    CACHE_BY_RANK_CURRENT=0,0,0,0
-    ;;
-  eplb)
-    PLACEMENT_MODE=scp_ep
-    PLACEMENT_PATH="${EPLB_PATH:-}"
-    SCP_PREFILL=1
-    ;;
-  prism)
-    PLACEMENT_MODE=scp_ep
-    PLACEMENT_PATH="${PRISM_PATH:-}"
-    SCP_PREFILL=1
-    ;;
-  static-hot)
-    PLACEMENT_MODE=scp_ep
-    SCP_PREFILL=1
-    CACHE_POLICY_CURRENT=hotpin_lru
-    HOTPIN_ENABLE=1
-    ;;
-  moe-infinity)
-    PLACEMENT_MODE=scp_ep
-    SCP_PREFILL=1
-    MOE_INFINITY_ENABLE=1
-    ;;
   scp)
     PLACEMENT_MODE=scp_ep
     SCP_PREFILL=1
@@ -176,14 +149,6 @@ if [[ "${DRY_RUN}" != "1" ]]; then
   fi
   if [[ "${RUN_RS}" == "1" && ! -d "${RS_DIR:-}" ]]; then
     echo "[run-case][ERROR] missing RS checkpoint directory: ${RS_DIR:-}" >&2
-    exit 2
-  fi
-  if [[ "${HOTPIN_ENABLE}" == "1" && ! -s "${HOT_PROFILE_PATH:-}" ]]; then
-    echo "[run-case][ERROR] missing HOT_PROFILE_PATH" >&2
-    exit 2
-  fi
-  if [[ "${MOE_INFINITY_ENABLE}" == "1" && ! -s "${MOE_INFINITY_EAMC_PATH:-}" ]]; then
-    echo "[run-case][ERROR] missing MOE_INFINITY_EAMC_PATH" >&2
     exit 2
   fi
 fi
@@ -290,15 +255,7 @@ ENV_ARGS=(env
   "SPARSE_EPIPE_MAX_STAGED_EXPERTS=1"
   "SPARSE_EPIPE_MIN_FREE_MB=384"
   "SPARSE_PLAIN_EP_EXEC_MODE=${PLAIN_EXEC}"
-  "SPARSE_PROMOE_EXECUTOR_CONTROL=0"
   "SPARSE_EP_FUSED_WEIGHT_DISPATCH=0"
-  "SPARSE_HOTPIN_ENABLE=${HOTPIN_ENABLE}"
-  "SPARSE_HOTPIN_PROFILE_PATH=${HOT_PROFILE_PATH:-}"
-  "SPARSE_HOTPIN_TOPK_PER_LAYER=2"
-  "SPARSE_MOE_INFINITY_POLICY=${MOE_INFINITY_ENABLE}"
-  "SPARSE_MOE_INFINITY_EAMC_PATH=${MOE_INFINITY_EAMC_PATH:-}"
-  "SPARSE_MOE_INFINITY_WINDOW_LAYERS=64"
-  "SPARSE_MOE_INFINITY_TOPK_PER_LAYER=${PREFETCH_TOP_M:-2}"
   "SPARSE_RESET_RUNTIME_STATE_EACH_REPEAT=1"
   "SPARSE_CLEAR_EXPERT_CACHE_EACH_REPEAT=1"
   "SPARSE_DEMOTE_HOT_CACHE_EACH_REPEAT=0"

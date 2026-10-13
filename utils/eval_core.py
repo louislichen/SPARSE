@@ -1462,12 +1462,8 @@ class LayerPerf:
     prefetch_rejected_cache_full: int = 0
     prefetch_rejected_low_score: int = 0
 
-    hotpin_hits: int = 0
-    hotpin_misses: int = 0
-    hotpin_prevented_evictions: int = 0
     ttl_prevented_evictions: int = 0
     cache_eviction_fallback_all_protected: int = 0
-    moe_infinity_demand_eviction_count: int = 0
     prefill_scp_transient_load_count: int = 0
     prefill_scp_transient_hit_count: int = 0
     prefill_scp_transient_promote_count: int = 0
@@ -2184,12 +2180,8 @@ class Metrics:
         self.prefetch_rejected_cache_full = 0
         self.prefetch_rejected_low_score = 0
 
-        self.hotpin_hits = 0
-        self.hotpin_misses = 0
-        self.hotpin_prevented_evictions = 0
         self.ttl_prevented_evictions = 0
         self.cache_eviction_fallback_all_protected = 0
-        self.moe_infinity_demand_eviction_count = 0
 
         self.warmup_loaded_experts = 0
         self.warmup_skipped_resident = 0
@@ -2338,7 +2330,6 @@ class Metrics:
 
 # ---------------- routing cache + stats ----------------
 class SparseContext:
-    promoe_runtime: Any = None
     num_layers: int = 0
     num_experts: int = 0
     routing_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]] = {}
@@ -2370,10 +2361,6 @@ class SparseContext:
     group_pred_value: Dict[int, torch.Tensor] = {}
     prefill_expert_counts: Dict[int, Dict[int, int]] = {}
     transition_source_experts: Dict[int, set[int]] = {}
-    moe_infinity_active_eam: Optional[np.ndarray] = None
-    moe_infinity_eamc: Optional[np.ndarray] = None
-    moe_infinity_matched_eam: Optional[np.ndarray] = None
-    moe_infinity_last_match_distance: float = float("nan")
     rs_bank_task: str = "router_prob"
     late_rs_bank_task: str = "router_prob"
     nodepatch_stats: Dict[str, float] = {}
@@ -2440,9 +2427,6 @@ class SparseContext:
 
     @classmethod
     def initialize(cls, num_layers: int, rs_group: int = 3, num_experts: int = 0) -> None:
-        if cls.promoe_runtime is not None:
-            cls.promoe_runtime.close()
-            cls.promoe_runtime = None
         cls.num_layers = int(num_layers)
         cls.num_experts = int(num_experts)
         cls.rs_group = int(rs_group)
@@ -2462,10 +2446,6 @@ class SparseContext:
         cls.group_pred_value = {}
         cls.prefill_expert_counts = {}
         cls.transition_source_experts = {}
-        cls.moe_infinity_active_eam = None
-        cls.moe_infinity_eamc = None
-        cls.moe_infinity_matched_eam = None
-        cls.moe_infinity_last_match_distance = float("nan")
         cls.rs_bank_task = "router_prob"
         cls.late_rs_bank_task = "router_prob"
         cls.reset_nodepatch_stats()
@@ -3086,8 +3066,6 @@ class SparseContext:
         cls.logical_ngd_ep_reuse_once = False
         cls.current_phase = "none"
         cls.current_moe_layer_idx = None
-        if cls.promoe_runtime is not None:
-            cls.promoe_runtime.reset(clear_cache=bool(clear_expert_cache))
         for _, blk in list(cls.layer_blocks.items()):
             reset_fn = getattr(blk, "reset_runtime_state_for_new_request", None)
             if callable(reset_fn):
@@ -3266,134 +3244,12 @@ class SparseContext:
         if int(call_id) >= 0:
             cls.transition_source_experts.clear()
 
-    @classmethod
-    def begin_moe_infinity_sequence(cls) -> None:
-        layers = max(1, int(getattr(cls, "num_layers", 0) or 1))
-        experts = max(1, int(getattr(cls, "num_experts", 0) or 1))
-        cls.moe_infinity_active_eam = np.zeros((layers, experts), dtype=np.float32)
-        cls.moe_infinity_matched_eam = None
-        cls.moe_infinity_last_match_distance = float("nan")
 
-    @classmethod
-    def record_moe_infinity_experts(cls, layer_idx: int, topk_indices: torch.Tensor) -> None:
-        if topk_indices is None or topk_indices.numel() == 0:
-            return
-        try:
-            flat = topk_indices.detach().reshape(-1).to("cpu", dtype=torch.long).numpy()
-        except Exception:
-            return
-        if cls.moe_infinity_active_eam is None:
-            cls.begin_moe_infinity_sequence()
-        arr = cls.moe_infinity_active_eam
-        if arr is None:
-            return
-        layer = int(layer_idx)
-        if layer < 0 or layer >= int(arr.shape[0]):
-            return
-        valid = flat[(flat >= 0) & (flat < int(arr.shape[1]))].astype(np.int64, copy=False)
-        if valid.size == 0:
-            return
-        binc = np.bincount(valid, minlength=int(arr.shape[1])).astype(np.float32, copy=False)
-        arr[layer, :] += binc
 
-    @classmethod
-    def snapshot_moe_infinity_eam(cls) -> Optional[np.ndarray]:
-        if cls.moe_infinity_active_eam is None:
-            return None
-        return np.asarray(cls.moe_infinity_active_eam, dtype=np.float32).copy()
 
-    @classmethod
-    def load_moe_infinity_eamc(cls, path: str, *, num_layers: int, num_experts: int) -> None:
-        raw_path = str(path or "").strip()
-        if not raw_path:
-            cls.moe_infinity_eamc = None
-            return
-        try:
-            with open(raw_path, "r", encoding="utf-8") as f:
-                obj = json.load(f)
-        except Exception:
-            cls.moe_infinity_eamc = None
-            return
-        raw = obj.get("eamc", obj.get("centers", obj.get("matrices", []))) if isinstance(obj, dict) else obj
-        try:
-            eamc = np.asarray(raw, dtype=np.float32)
-        except Exception:
-            cls.moe_infinity_eamc = None
-            return
-        if eamc.ndim == 2:
-            eamc = eamc.reshape(1, eamc.shape[0], eamc.shape[1])
-        if eamc.ndim != 3:
-            cls.moe_infinity_eamc = None
-            return
-        target = np.zeros((int(eamc.shape[0]), int(num_layers), int(num_experts)), dtype=np.float32)
-        l = min(int(num_layers), int(eamc.shape[1]))
-        e = min(int(num_experts), int(eamc.shape[2]))
-        if l > 0 and e > 0:
-            target[:, :l, :e] = eamc[:, :l, :e]
-        cls.moe_infinity_eamc = target
 
-    @classmethod
-    def _moe_infinity_eam_distance(cls, lhs: Optional[np.ndarray], rhs: Optional[np.ndarray]) -> float:
-        if lhs is None or rhs is None:
-            return float("inf")
-        a = np.asarray(lhs, dtype=np.float32).reshape(-1)
-        b = np.asarray(rhs, dtype=np.float32).reshape(-1)
-        denom = float(np.linalg.norm(a) * np.linalg.norm(b))
-        if denom <= 0.0:
-            return float("inf")
-        sim = float(np.dot(a, b) / denom)
-        return float(1.0 - sim)
 
-    @classmethod
-    def select_moe_infinity_matched_eam(cls, max_history: int = 64) -> None:
-        current = cls.snapshot_moe_infinity_eam()
-        eamc = cls.moe_infinity_eamc
-        if current is not None and eamc is not None and int(eamc.shape[0]) > 0:
-            distances = [cls._moe_infinity_eam_distance(current, eamc[i]) for i in range(int(eamc.shape[0]))]
-            best = int(np.argmin(np.asarray(distances, dtype=np.float32)))
-            cls.moe_infinity_matched_eam = np.asarray(eamc[best], dtype=np.float32)
-            cls.moe_infinity_last_match_distance = float(distances[best])
-        else:
-            cls.moe_infinity_matched_eam = None
-            cls.moe_infinity_last_match_distance = float("nan")
 
-    @classmethod
-    def moe_infinity_future_scores(
-        cls,
-        current_layer: int,
-        window_layers: int,
-        layer_decay: float,
-        epsilon: float = 1e-4,
-    ) -> Dict[int, Dict[int, float]]:
-        matched = cls.moe_infinity_matched_eam
-        if matched is None:
-            return {}
-        out: Dict[int, Dict[int, float]] = {}
-        start = int(current_layer) + 1
-        end = min(int(cls.num_layers), start + max(1, int(window_layers)))
-        for layer in range(start, end):
-            if layer < 0 or layer >= int(matched.shape[0]):
-                continue
-            counts = np.asarray(matched[layer], dtype=np.float32)
-            total = float(counts.sum())
-            if total <= 0.0:
-                continue
-            ratios = counts / total
-            distance = int(layer) - int(current_layer)
-            if float(layer_decay) >= 1.0:
-                layer_weight = 1.0 / float(float(layer_decay) ** max(0, distance - 1))
-            else:
-                # Paper-style linear layer-proximity priority: nearer layers
-                # get larger weight while farther layers remain eligible.
-                layer_weight = max(0.0, 1.0 - (float(distance - 1) / float(max(1, int(cls.num_layers)))))
-            score: Dict[int, float] = {}
-            for eid, val in enumerate(ratios.tolist()):
-                if float(val) <= 0.0:
-                    continue
-                score[int(eid)] = float((float(val) + float(epsilon)) * float(layer_weight))
-            if score:
-                out[int(layer)] = score
-        return out
 
     @classmethod
     def record_prefill_experts(cls, layer_idx: int, topk_indices: torch.Tensor) -> None:
@@ -3788,7 +3644,6 @@ def _load_runtime_rs_bank(
 class CacheEntry:
     payload: Any
     pinned: bool = False
-    hot: bool = False
     prefill_scp_transient: bool = False
 
 
@@ -4606,8 +4461,8 @@ class DistributedSparseMoeBlock(nn.Module):
             raise ValueError(f"placement_mode must be scp|scp_ep|round_robin|weighted_random_balanced, got {self.placement_mode}")
 
         self.planner_mode = str(planner_mode)
-        if self.planner_mode not in ("none", "rs_prefetch", "promoe"):
-            raise ValueError(f"planner_mode must be none|rs_prefetch|promoe, got {self.planner_mode}")
+        if self.planner_mode not in ("none", "rs_prefetch"):
+            raise ValueError(f"planner_mode must be none|rs_prefetch, got {self.planner_mode}")
 
         self.expert_source = str(expert_source)
         if self.expert_source not in ("router", "rs"):
@@ -4921,8 +4776,8 @@ class DistributedSparseMoeBlock(nn.Module):
             raise ValueError(f"expert_offload must be cpu|gpu, got {self.expert_offload}")
 
         self.cache_policy = str(cache_policy).lower()
-        if self.cache_policy not in ("lru", "lfu", "hotpin_lru", "hotpin_lru_ttl", "tiered"):
-            raise ValueError(f"cache_policy must be lru|lfu|hotpin_lru|hotpin_lru_ttl|tiered, got {self.cache_policy}")
+        if self.cache_policy not in ("lru", "lfu", "tiered"):
+            raise ValueError(f"cache_policy must be lru|lfu|tiered, got {self.cache_policy}")
 
         oracle_async_requested = (
             self.oracle_mode == "replay"
@@ -4958,7 +4813,7 @@ class DistributedSparseMoeBlock(nn.Module):
             # below, so a target layer can admit future experts even when the
             # old per-layer expert_cache would have been full.
             self._cache = ExpertWeightCache(max(1, int(len(self.local_expert_ids))))
-        elif self.cache_policy in ("lru", "lfu", "hotpin_lru", "hotpin_lru_ttl"):
+        elif self.cache_policy in ("lru", "lfu"):
             self._cache = ExpertWeightCache(expert_cache)
         else:
             base_capacity = int(expert_cache)
@@ -5057,13 +4912,6 @@ class DistributedSparseMoeBlock(nn.Module):
             not in ("", "0", "false", "no", "off")
         )
         self._transition_prefetch_enabled = _env_flag("SPARSE_TRANSITION_PREFETCH", "0")
-        self._moe_infinity_policy_enabled = _env_flag("SPARSE_MOE_INFINITY_POLICY", "0")
-        self._moe_infinity_window_layers = max(1, _env_int("SPARSE_MOE_INFINITY_WINDOW_LAYERS", 2))
-        self._moe_infinity_layer_decay = _env_float("SPARSE_MOE_INFINITY_LAYER_DECAY", 0.0)
-        self._moe_infinity_topk_per_layer = max(1, _env_int("SPARSE_MOE_INFINITY_TOPK_PER_LAYER", int(self.prefetch_top_m)))
-        self._moe_infinity_history_size = max(1, _env_int("SPARSE_MOE_INFINITY_HISTORY_SIZE", 64))
-        self._moe_infinity_priority_epsilon = max(0.0, _env_float("SPARSE_MOE_INFINITY_PRIORITY_EPSILON", 1e-4))
-        self._moe_infinity_admit_active = False
         self._epipe_enable = _env_flag("SPARSE_EPIPE_ENABLE", "0")
         self._epipe_shadow = _env_flag("SPARSE_EPIPE_SHADOW", "0")
         self._epipe_mode = str(os.environ.get("SPARSE_EPIPE_MODE", "upfront_scan") or "upfront_scan").strip().lower()
@@ -5162,7 +5010,6 @@ class DistributedSparseMoeBlock(nn.Module):
                     self.planner_mode == "rs_prefetch"
                     or self._oracle_async_prefetch
                     or self._transition_prefetch_enabled
-                    or bool(getattr(self, "_moe_infinity_policy_enabled", False))
                 )
             )
             else None
@@ -5201,12 +5048,7 @@ class DistributedSparseMoeBlock(nn.Module):
         self._cache_value_min_candidate_score = float(os.environ.get("SPARSE_CACHE_VALUE_MIN_CAND_SCORE", "0.0"))
         self._cache_value_replace_advantage = float(os.environ.get("SPARSE_CACHE_VALUE_REPLACE_ADVANTAGE", "0.02"))
 
-        self._hotpin_enabled = _env_flag("SPARSE_HOTPIN_ENABLE", "0") or self.cache_policy in ("hotpin_lru", "hotpin_lru_ttl")
-        self._hotpin_protect = _env_flag("SPARSE_CACHE_PROTECT_HOTPIN", "1")
-        self._hotpin_ids: set[int] = self._load_hotpin_ids()
         self._cache_ttl_steps = max(0, _env_int("SPARSE_CACHE_TTL_STEPS", 0))
-        if self.cache_policy == "hotpin_lru_ttl" and self._cache_ttl_steps <= 0:
-            self._cache_ttl_steps = 4
         self._last_used_decode_step: Dict[int, int] = {}
         self._cache_eviction_fallback_all_protected = 0
         self._transition_table = self._load_transition_table() if self._transition_prefetch_enabled else {}
@@ -5216,8 +5058,6 @@ class DistributedSparseMoeBlock(nn.Module):
         self._transition_rate_limit = _env_flag("SPARSE_TRANSITION_RATE_LIMIT", "1")
         self._transition_prefetched_ids: set[int] = set()
         self._transition_used_ids: set[int] = set()
-        self._moe_infinity_prefetched_ids: set[int] = set()
-        self._moe_infinity_used_ids: set[int] = set()
 
         self.owner_load_balance_alpha = float(os.environ.get("SPARSE_OWNER_LOAD_BALANCE_ALPHA", "0.35"))
         self.owner_workingset_gamma = float(os.environ.get("SPARSE_OWNER_WORKINGSET_GAMMA", "0.08"))
@@ -5553,15 +5393,6 @@ class DistributedSparseMoeBlock(nn.Module):
         if lp is not None:
             lp.cache_miss_count += 1
 
-    def _record_hotpin_cache_access(self, eid: int, hit: bool) -> None:
-        if not bool(getattr(self, "_hotpin_enabled", False)):
-            return
-        if int(eid) not in getattr(self, "_hotpin_ids", set()):
-            return
-        if bool(hit):
-            self._record_metric_counter("hotpin_hits", 1)
-        else:
-            self._record_metric_counter("hotpin_misses", 1)
 
     def _record_prefetch_admitted(self) -> None:
         if self.metrics is not None:
@@ -5844,7 +5675,6 @@ class DistributedSparseMoeBlock(nn.Module):
             payload = None
         if payload is None:
             return None
-        self._record_hotpin_cache_access(int(eid), True)
         self._record_cache_hit()
         self._record_epipe_counter("epipe_prefill_extra_cache_hit_count", 1)
         return payload
@@ -6052,36 +5882,6 @@ class DistributedSparseMoeBlock(nn.Module):
         self._record_epipe_counter("epipe_rs_demand_stage_disabled_by_gate_count", 1)
         return False
 
-    def _load_hotpin_ids(self) -> set[int]:
-        if not bool(getattr(self, "_hotpin_enabled", False)):
-            return set()
-        path = str(os.environ.get("SPARSE_HOTPIN_PROFILE_PATH", "") or "").strip()
-        if not path:
-            return set()
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                raw = json.load(f)
-        except Exception:
-            return set()
-        layer_obj = None
-        if isinstance(raw, dict):
-            layer_obj = raw.get(str(self.layer_idx), raw.get(int(self.layer_idx), None))
-            if layer_obj is None and isinstance(raw.get("layers"), dict):
-                layers = raw.get("layers") or {}
-                layer_obj = layers.get(str(self.layer_idx), layers.get(int(self.layer_idx), None))
-        if not isinstance(layer_obj, dict):
-            return set()
-        try:
-            topk = max(1, int(os.environ.get("SPARSE_HOTPIN_TOPK_PER_LAYER", "1") or 1))
-        except Exception:
-            topk = 1
-        ids = layer_obj.get("top_experts", [])
-        out = set()
-        for eid in list(ids)[:topk]:
-            eid_i = int(eid)
-            if eid_i in self._local_eid_set:
-                out.add(eid_i)
-        return out
 
     def _load_transition_table(self) -> Dict[int, List[int]]:
         path = str(os.environ.get("SPARSE_TRANSITION_TABLE_PATH", "") or "").strip()
@@ -6104,15 +5904,6 @@ class DistributedSparseMoeBlock(nn.Module):
 
     def _cache_protect_ids(self) -> set[int]:
         protect: set[int] = set()
-        if bool(getattr(self, "_hotpin_enabled", False)) and bool(getattr(self, "_hotpin_protect", True)):
-            protect.update(int(x) for x in getattr(self, "_hotpin_ids", set()))
-        if bool(getattr(self, "_moe_infinity_policy_enabled", False)):
-            topk = max(0, _env_int("SPARSE_MOE_INFINITY_PROTECT_TOPK", int(getattr(self, "_moe_infinity_topk_per_layer", 0))))
-            if topk > 0:
-                scores = self._moe_infinity_layer_priority_scores(include_current=True)
-                if scores:
-                    ranked = sorted(scores.items(), key=lambda kv: (-float(kv[1]), int(kv[0])))
-                    protect.update(int(eid) for eid, _ in ranked[:topk])
         ttl = int(getattr(self, "_cache_ttl_steps", 0))
         if ttl > 0 and str(SparseContext.current_phase) == "decode":
             step = int(getattr(SparseContext, "runtime_call_id", -1))
@@ -6140,54 +5931,16 @@ class DistributedSparseMoeBlock(nn.Module):
             return
         if int(evicted) in protect_ids:
             return
-        hot = set(int(x) for x in getattr(self, "_hotpin_ids", set()))
-        ttl_protect = set(int(x) for x in protect_ids) - hot
+        ttl_protect = set(int(x) for x in protect_ids)
         try:
             resident = set(int(x) for x in self._cache.resident_ids())
         except Exception:
             resident = set()
-        blocked_hot = len((hot & resident) - {int(evicted)})
         blocked_ttl = len((ttl_protect & resident) - {int(evicted)})
-        if blocked_hot > 0:
-            self._record_metric_counter("hotpin_prevented_evictions", 1)
         if blocked_ttl > 0:
             self._record_metric_counter("ttl_prevented_evictions", 1)
 
-    def _moe_infinity_layer_priority_scores(self, *, include_current: bool = False) -> Dict[int, float]:
-        matched = getattr(SparseContext, "moe_infinity_matched_eam", None)
-        if matched is None:
-            return {}
-        layer = int(self.layer_idx)
-        if layer < 0 or layer >= int(matched.shape[0]):
-            return {}
-        counts = np.asarray(matched[layer], dtype=np.float32)
-        total = float(counts.sum())
-        if total <= 0.0:
-            return {}
-        ratios = counts / total
-        eps = float(getattr(self, "_moe_infinity_priority_epsilon", 1e-4))
-        out: Dict[int, float] = {}
-        for eid, val in enumerate(ratios.tolist()):
-            if include_current or float(val) > 0.0:
-                out[int(eid)] = float(val) + eps
-        return out
 
-    def _moe_infinity_preferred_demand_victim(self, new_eid: int, protect_ids: set[int]) -> Optional[int]:
-        if not bool(getattr(self, "_moe_infinity_policy_enabled", False)):
-            return None
-        try:
-            resident = [int(x) for x in self._cache.resident_ids()]
-        except Exception:
-            return None
-        if len(resident) < int(getattr(self._cache, "capacity", 0)):
-            return None
-        scores = self._moe_infinity_layer_priority_scores(include_current=True)
-        candidates = [eid for eid in resident if int(eid) != int(new_eid) and int(eid) not in protect_ids]
-        if not candidates:
-            candidates = [eid for eid in resident if int(eid) != int(new_eid)]
-        if not candidates:
-            return None
-        return min(candidates, key=lambda eid: (float(scores.get(int(eid), 0.0)), int(eid)))
 
     def _should_mark_prefill_scp_transient(self, eid: int, is_prefetch: bool = False) -> bool:
         if is_prefetch:
@@ -6220,13 +5973,6 @@ class DistributedSparseMoeBlock(nn.Module):
             else bool(prefill_scp_transient)
         )
         protect = self._cache_protect_ids_with_fallback(new_eid=int(eid))
-        preferred_victim = self._moe_infinity_preferred_demand_victim(int(eid), protect)
-        if preferred_victim is not None:
-            try:
-                self._cache.discard(int(preferred_victim))
-                self._record_metric_counter("moe_infinity_demand_eviction_count", 1)
-            except Exception:
-                preferred_victim = None
         try:
             evicted = self._cache.put(
                 int(eid),
@@ -6347,8 +6093,6 @@ class DistributedSparseMoeBlock(nn.Module):
             "_prefetch_used_ids_this_group",
             "_transition_prefetched_ids",
             "_transition_used_ids",
-            "_moe_infinity_prefetched_ids",
-            "_moe_infinity_used_ids",
         ):
             obj = getattr(self, name, None)
             if hasattr(obj, "clear"):
@@ -10221,8 +9965,6 @@ class DistributedSparseMoeBlock(nn.Module):
     def _resident_keep_bias(self, eid: int) -> float:
         freq = float(min(self._expert_access_freq.get(int(eid), 0), 16))
         bias = 0.02 * freq
-        if int(eid) in getattr(self, "_hotpin_ids", set()):
-            bias += 1.0
         if hasattr(self._cache, '_hot') and int(eid) in getattr(self._cache, '_hot', {}):
             bias += 0.25
         if int(eid) in self._prefetched_ids_this_group:
@@ -10325,14 +10067,6 @@ class DistributedSparseMoeBlock(nn.Module):
         return out
 
     def _pick_victims_by_low_value(self, score_map: Dict[int, float], protect_ids: set[int]) -> List[int]:
-        if bool(getattr(self, "_moe_infinity_admit_active", False)):
-            evictable = self._prefetch_evictable_ids(protect_ids)
-            ranked: List[Tuple[float, int, int]] = []
-            for order_idx, eid in enumerate(evictable):
-                keep_value = float(score_map.get(int(eid), 0.0))
-                ranked.append((keep_value, order_idx, int(eid)))
-            ranked.sort(key=lambda x: (x[0], x[1]))
-            return [eid for _, _, eid in ranked]
         evictable = self._prefetch_evictable_ids(protect_ids)
         cold_ranked: List[Tuple[float, int, int]] = []
         for order_idx, eid in enumerate(evictable):
@@ -10848,83 +10582,6 @@ class DistributedSparseMoeBlock(nn.Module):
             return
         SparseContext.set_transition_source_experts(target_layer, flat)
 
-    def _schedule_moe_infinity_prefetch(self) -> None:
-        if not bool(getattr(self, "_moe_infinity_policy_enabled", False)):
-            return
-        if self.expert_offload != "cpu" or self.prefetch_top_m <= 0:
-            return
-        if str(getattr(SparseContext, "current_phase", "none")) != "decode":
-            return
-        future = SparseContext.moe_infinity_future_scores(
-            current_layer=int(self.layer_idx),
-            window_layers=int(getattr(self, "_moe_infinity_window_layers", 2)),
-            layer_decay=float(getattr(self, "_moe_infinity_layer_decay", 1.2)),
-            epsilon=float(getattr(self, "_moe_infinity_priority_epsilon", 1e-4)),
-        )
-        if not future:
-            return
-        for target_layer, score_map_raw in sorted(future.items(), key=lambda kv: int(kv[0])):
-            target_layer = int(target_layer)
-            target_blk = SparseContext.layer_blocks.get(target_layer, None)
-            if target_blk is None or not isinstance(target_blk, DistributedSparseMoeBlock):
-                continue
-            if not bool(getattr(target_blk, "_moe_infinity_policy_enabled", False)):
-                continue
-            if target_blk.expert_offload != "cpu" or target_blk.prefetch_top_m <= 0:
-                continue
-            score_map: Dict[int, float] = {}
-            for eid, score in score_map_raw.items():
-                eid_i = int(eid)
-                resolved = target_blk.resolve_prefetch_target_rank(
-                    layer_idx=target_layer,
-                    source_rank=int(self.comm_rank),
-                    expert_id=eid_i,
-                    stage="decode",
-                    count_metrics=False,
-                    reason="moe_infinity_prefetch",
-                )
-                if int(resolved.target_rank) != int(target_blk.comm_rank):
-                    continue
-                score_map[eid_i] = float(score)
-            if not score_map:
-                continue
-            target_blk._begin_group_prefetch_cycle(
-                target_layer,
-                target_layer + 1,
-                cycle_key=("moe_infinity", int(SparseContext.runtime_call_id), int(self.layer_idx), target_layer),
-            )
-            protect = target_blk._prefetch_protect_ids()
-            budget = min(
-                int(getattr(target_blk, "_moe_infinity_topk_per_layer", target_blk.prefetch_top_m)),
-                int(target_blk._prefetch_total_insert_capacity(protect)),
-            )
-            budget = max(0, int(budget))
-            if target_blk.metrics is not None:
-                if budget <= 0:
-                    target_blk.metrics.prefetch_budget_zero_count += 1
-                else:
-                    target_blk.metrics.prefetch_budget_positive_count += 1
-            if budget <= 0:
-                continue
-            plan = target_blk._build_prefetch_plan_from_score_map(
-                score_map,
-                protect_ids=protect,
-                budget=budget,
-                min_candidate_score=0.0,
-                replace_advantage=0.0,
-                replace_margin=1.0,
-                allow_active_replace=True,
-            )
-            if not plan:
-                continue
-            old_mi = bool(getattr(target_blk, "_moe_infinity_admit_active", False))
-            target_blk._moe_infinity_admit_active = True
-            try:
-                target_blk._admit_prefetch_plan(plan, group_end=target_layer + 1)
-            finally:
-                target_blk._moe_infinity_admit_active = old_mi
-            for eid, _victim in plan:
-                target_blk._moe_infinity_prefetched_ids.add(int(eid))
 
     def warmup_cache_from_prefill_counts(self) -> None:
         if not _env_flag("SPARSE_PREFILL_DECODE_WARMUP", "0"):
@@ -11498,8 +11155,6 @@ class DistributedSparseMoeBlock(nn.Module):
             return False
         if eid not in self._local_eid_set:
             return False
-        if bool(getattr(self, "_hotpin_enabled", False)) and int(eid) in getattr(self, "_hotpin_ids", set()):
-            return True
         if self.cache_policy == "lfu":
             return int(self._expert_access_freq.get(eid, 0)) >= 1
         return int(self._expert_access_freq.get(eid, 0)) >= 2
@@ -11609,8 +11264,6 @@ class DistributedSparseMoeBlock(nn.Module):
             return
 
     def _get_local_fused(self, eid: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        if self.planner_mode == "promoe":
-            return SparseContext.promoe_runtime.prefetcher.acquire(self.layer_idx, int(eid))
         if self.oracle_mode == "replay":
             oracle_payload = self._oracle_gpu_fused.get(int(eid), None)
             if oracle_payload is not None:
@@ -11620,7 +11273,6 @@ class DistributedSparseMoeBlock(nn.Module):
             return self.local_gate_up_gpu[eid], self.local_down_gpu[eid]
         cached = self._cache.get(eid)
         if cached is not None:
-            self._record_hotpin_cache_access(eid, True)
             self._maybe_upgrade_prefill_scp_transient_on_decode(eid)
             if self.metrics is not None:
                 if eid in self._prefetched_ids_this_group:
@@ -11641,7 +11293,6 @@ class DistributedSparseMoeBlock(nn.Module):
         extra_cached = self._epipe_prefill_extra_cache_get(eid, touch=True)
         if extra_cached is not None:
             return extra_cached
-        self._record_hotpin_cache_access(eid, False)
         self._record_cache_miss()
         _stall_begin = self._record_demand_h2d_window_begin()
         required_bytes = self._epipe_estimate_expert_nbytes(eid)
@@ -11663,8 +11314,6 @@ class DistributedSparseMoeBlock(nn.Module):
         return gate_up, down
 
     def _get_local_module_weights(self, eid: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        if self.planner_mode == "promoe":
-            return SparseContext.promoe_runtime.prefetcher.acquire(self.layer_idx, int(eid))
         if self.oracle_mode == "replay":
             oracle_payload = self._oracle_gpu_module.get(int(eid), None)
             if oracle_payload is not None:
@@ -11672,7 +11321,6 @@ class DistributedSparseMoeBlock(nn.Module):
                 return oracle_payload
         cached = self._cache.get(eid)
         if cached is not None:
-            self._record_hotpin_cache_access(eid, True)
             self._maybe_upgrade_prefill_scp_transient_on_decode(eid)
             if self.metrics is not None:
                 if eid in self._prefetched_ids_this_group:
@@ -11693,7 +11341,6 @@ class DistributedSparseMoeBlock(nn.Module):
         extra_cached = self._epipe_prefill_extra_cache_get(eid, touch=True)
         if extra_cached is not None:
             return extra_cached
-        self._record_hotpin_cache_access(eid, False)
         self._record_cache_miss()
         _stall_begin = self._record_demand_h2d_window_begin()
         required_bytes = self._epipe_estimate_expert_nbytes(eid)
@@ -11750,7 +11397,6 @@ class DistributedSparseMoeBlock(nn.Module):
         eid = int(eid)
         cached = self._cache.get(eid)
         if cached is not None:
-            self._record_hotpin_cache_access(eid, True)
             self._maybe_upgrade_prefill_scp_transient_on_decode(eid)
             self._record_cache_hit()
             self._maybe_wait_prefetch(eid)
@@ -11758,7 +11404,6 @@ class DistributedSparseMoeBlock(nn.Module):
         extra_cached = self._epipe_prefill_extra_cache_get(eid, touch=True)
         if extra_cached is not None:
             return extra_cached
-        self._record_hotpin_cache_access(eid, False)
         self._record_cache_miss()
         _stall_begin = self._record_demand_h2d_window_begin()
         required_bytes = self._epipe_estimate_expert_nbytes(eid)
@@ -11782,7 +11427,6 @@ class DistributedSparseMoeBlock(nn.Module):
         eid = int(eid)
         cached = self._cache.get(eid)
         if cached is not None:
-            self._record_hotpin_cache_access(eid, True)
             self._maybe_upgrade_prefill_scp_transient_on_decode(eid)
             self._record_cache_hit()
             self._maybe_wait_prefetch(eid)
@@ -11790,7 +11434,6 @@ class DistributedSparseMoeBlock(nn.Module):
         extra_cached = self._epipe_prefill_extra_cache_get(eid, touch=True)
         if extra_cached is not None:
             return extra_cached
-        self._record_hotpin_cache_access(eid, False)
         self._record_cache_miss()
         _stall_begin = self._record_demand_h2d_window_begin()
         required_bytes = self._epipe_estimate_expert_nbytes(eid)
@@ -11936,7 +11579,6 @@ class DistributedSparseMoeBlock(nn.Module):
 
     def _epipe_record_cached_payload_use(self, eid: int, *, wait_prefetch: bool = True) -> None:
         eid = int(eid)
-        self._record_hotpin_cache_access(eid, True)
         self._maybe_upgrade_prefill_scp_transient_on_decode(eid)
         if self.metrics is not None:
             if eid in self._prefetched_ids_this_group:
@@ -12709,7 +12351,6 @@ class DistributedSparseMoeBlock(nn.Module):
                     payload.record_stream(cur_stream)
 
                 self._record_cache_miss()
-                self._record_hotpin_cache_access(residual_eid, False)
                 self._on_demand_access(residual_eid)
                 self._epipe_record_staged_demand_h2d(int(copied_nbytes))
 
@@ -13039,7 +12680,6 @@ class DistributedSparseMoeBlock(nn.Module):
                     payload.record_stream(cur_stream)
 
                 self._record_cache_miss()
-                self._record_hotpin_cache_access(eid, False)
                 self._on_demand_access(eid)
                 self._epipe_record_staged_demand_h2d(int(copied_nbytes))
 
@@ -13325,7 +12965,6 @@ class DistributedSparseMoeBlock(nn.Module):
                     payload.record_stream(cur_stream)
 
                 self._record_cache_miss()
-                self._record_hotpin_cache_access(eid, False)
                 if stage != "prefill":
                     self._on_demand_access(eid)
                 self._epipe_record_staged_demand_h2d(int(copied_nbytes))
@@ -13425,8 +13064,6 @@ class DistributedSparseMoeBlock(nn.Module):
         - process contiguous expert-id segments
         - avoid per-expert full-length boolean mask scans
         """
-        if self.planner_mode == "promoe" or _env_flag("SPARSE_PROMOE_EXECUTOR_CONTROL", "0"):
-            return self._execute_promoe_recv_groups(recv_hidden, recv_i, recv_w)
         if recv_i.numel() == 0:
             return torch.zeros_like(recv_hidden)
 
@@ -13626,46 +13263,6 @@ class DistributedSparseMoeBlock(nn.Module):
                 int(self.layer_idx),
                 {"expert_compute_ms": float(cp_compute_ms)},
             )
-        return out
-
-    def _execute_promoe_recv_groups(self, recv_hidden, recv_i, recv_w):
-        """Same sorted-segment arithmetic, independent ProMoE copy/ordering policy."""
-        prefetcher = SparseContext.promoe_runtime.prefetcher if self.planner_mode == "promoe" else None
-        order = torch.argsort(recv_i)
-        sorted_ids = recv_i[order]
-        ids, counts = torch.unique_consecutive(sorted_ids, return_counts=True)
-        ids, counts = ids.tolist(), counts.tolist()
-        segments = {}
-        offset = 0
-        for eid, count in zip(ids, counts):
-            segments[int(eid)] = (offset, offset + count)
-            offset += count
-        execution_order = ids
-        if prefetcher is not None:
-            with prefetcher.cv:
-                entries = prefetcher.layers[self.layer_idx].entries
-                ready_ids = {eid for eid in ids if eid in entries
-                    and entries[eid].ready_chunks == len(entries[eid].payload)}
-                execution_order = prefetcher.precise(self.layer_idx, ids, int(SparseContext.runtime_call_id))
-            if self.metrics is not None:
-                for eid in ids:
-                    self._record_cache_hit() if eid in ready_ids else self._record_cache_miss()
-        out_sorted = torch.zeros_like(recv_hidden)
-        hidden_sorted, w_sorted = recv_hidden[order], recv_w[order]
-        for eid in execution_order:
-            start, end = segments[eid]
-            try:
-                y, _ = self._plain_ep_compute_segment(
-                    eid=eid, cur=hidden_sorted[start:end], cur_w=w_sorted[start:end].unsqueeze(1),
-                    eid_is_local=True, allow_nonlocal=False)
-                out_sorted[start:end] = y
-            finally:
-                if prefetcher is not None:
-                    entry = prefetcher.layers[self.layer_idx].entries.get(eid)
-                    if entry is not None and entry.leased:
-                        prefetcher.release(self.layer_idx, eid)
-        out = torch.zeros_like(recv_hidden)
-        out[order] = out_sorted
         return out
 
     def _execute_local_rank_grouped_packets(
@@ -14987,11 +14584,6 @@ class DistributedSparseMoeBlock(nn.Module):
     def _experts_world1_exact(self, x: torch.Tensor, idx: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
         T = int(x.shape[0])
         H = int(x.shape[1])
-        if self.planner_mode == "promoe" or _env_flag("SPARSE_PROMOE_EXECUTOR_CONTROL", "0"):
-            k = int(idx.shape[1])
-            routed = self._execute_promoe_recv_groups(x.repeat_interleave(k, dim=0),
-                idx.reshape(-1), w.reshape(-1))
-            return routed.reshape(T, k, H).sum(dim=1)
         final = torch.zeros((T, H), device=x.device, dtype=x.dtype)
         expert_mask = F.one_hot(idx.to(torch.long), num_classes=self.num_experts).permute(2, 1, 0)
         for expert_idx in range(self.num_experts):
@@ -16738,8 +16330,6 @@ class DistributedSparseMoeBlock(nn.Module):
         group_end = min(g + self.rs_group, self.num_layers)
         SparseContext.current_moe_layer_idx = int(self.layer_idx)
         physical_comm_trace_state = self._physical_moe_comm_trace_begin()
-        if self.planner_mode == "promoe":
-            SparseContext.promoe_runtime.prefetcher.begin_step(int(SparseContext.runtime_call_id))
 
         owner_local_batch = bool(getattr(self, "_sparse_local_owner_batch", False))
         if owner_local_batch:
@@ -16788,12 +16378,8 @@ class DistributedSparseMoeBlock(nn.Module):
             src_experts = SparseContext.pop_transition_source_experts(int(self.layer_idx))
             self._schedule_transition_prefetch_from_sources(src_experts)
 
-        if int(S) == 1 and bool(getattr(self, "_moe_infinity_policy_enabled", False)):
-            self._schedule_moe_infinity_prefetch()
 
         w, idx, router_logits = self._timed_segment("router", lambda: self._routing_for_execute(x))
-        if bool(getattr(self, "_moe_infinity_policy_enabled", False)):
-            SparseContext.record_moe_infinity_experts(self.layer_idx, idx)
         SparseContext.record_routing_profile(
             layer_idx=int(self.layer_idx),
             source_rank=int(self.comm_rank),
@@ -17343,8 +16929,6 @@ class DistributedSparseMoeBlock(nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         cached = self._cache.get(eid)
         if cached is not None:
-            if bool(count_as_access):
-                self._record_hotpin_cache_access(eid, True)
             if count_as_access and self.metrics is not None:
                 if eid in self._prefetched_ids_this_group:
                     self._record_cache_hit(is_prefetch_hit=True)
@@ -17363,7 +16947,6 @@ class DistributedSparseMoeBlock(nn.Module):
             return cached
 
         if count_as_access:
-            self._record_hotpin_cache_access(eid, False)
             self._record_cache_miss()
         if count_as_access:
             self._on_demand_access(eid)
@@ -18054,17 +17637,6 @@ class ModelBundle:
 
 
 def build_model_and_tokenizer(cfg: CoreBuildConfig, env: DistEnv, metrics=None) -> ModelBundle:
-    if cfg.planner_mode == "promoe":
-        if (cfg.placement_mode != "round_robin" or cfg.routing_mode != "router"
-                or cfg.expert_source != "router" or cfg.cache_policy != "lru"
-                or cfg.expert_offload != "cpu" or cfg.oracle_mode != "none" or cfg.enable_skvs):
-            raise ValueError("ProMoE-style requires RR ownership, original router, CPU offload, LRU, and no oracle/SKVS")
-        incompatible = ("SPARSE_EPIPE_ENABLE", "SPARSE_EPIPE_PREFILL_ENABLE",
-            "SPARSE_RS_TWO_STAGE", "SPARSE_MOE_INFINITY_POLICY", "SPARSE_HOTPIN_ENABLE",
-            "SPARSE_NODE_GROUPED_DISPATCH", "SPARSE_RANK_GROUPED_DISPATCH",
-            "SPARSE_ERS_ENABLE", "SPARSE_NODEPATCH_ENABLE", "SPARSE_GLOBAL_EXPERT_CACHE")
-        if any(_env_flag(key, "0") for key in incompatible):
-            raise ValueError("Disable SPARSE-specific placement/prefetch/execution extensions for ProMoE-style")
     dtype = torch.float16 if cfg.dtype == "float16" else torch.bfloat16
     topology = build_dist_topology(
         env,
@@ -18308,15 +17880,6 @@ def build_model_and_tokenizer(cfg: CoreBuildConfig, env: DistEnv, metrics=None) 
         gc.collect()
         torch.cuda.empty_cache()
 
-    if cfg.planner_mode == "promoe":
-        from utils.promoe import ProMoERuntime, register_prediction_hooks
-        SparseContext.promoe_runtime = ProMoERuntime(SparseContext.layer_blocks,
-            os.environ.get("SPARSE_PROMOE_DIR", ""),
-            distance=int(os.environ.get("SPARSE_PROMOE_DISTANCE", "2")),
-            predict_prefill=_env_flag("SPARSE_PROMOE_PREDICT_PREFILL", "0"))
-        register_prediction_hooks(model.model.layers, SparseContext.promoe_runtime,
-            lambda: (int(SparseContext.runtime_call_id), str(SparseContext.current_phase)))
-
     model.model.embed_tokens = model.model.embed_tokens.to(env.device, dtype=dtype)
     model.model.norm = model.model.norm.to(env.device, dtype=dtype)
 
@@ -18345,23 +17908,6 @@ def build_model_and_tokenizer(cfg: CoreBuildConfig, env: DistEnv, metrics=None) 
 
     model.eval()
 
-    if _env_flag("SPARSE_MOE_INFINITY_POLICY", "0"):
-        eamc_path = str(os.environ.get("SPARSE_MOE_INFINITY_EAMC_PATH", "") or "").strip()
-        SparseContext.load_moe_infinity_eamc(
-            eamc_path,
-            num_layers=int(num_layers),
-            num_experts=int(num_experts),
-        )
-        if env.rank == 0:
-            loaded = SparseContext.moe_infinity_eamc
-            if loaded is None:
-                print(f"[MoE-Infinity] EAMC unavailable path={eamc_path}", flush=True)
-            else:
-                print(
-                    f"[MoE-Infinity] policy=1 eamc={eamc_path} centers={int(loaded.shape[0])} "
-                    f"shape=({int(loaded.shape[1])},{int(loaded.shape[2])})",
-                    flush=True,
-                )
 
     SparseContext.set_oracle_mode(str(cfg.oracle_mode), str(cfg.oracle_trace_dir))
     if str(cfg.oracle_mode) == "replay":
@@ -18761,8 +18307,6 @@ def greedy_decode_profiled(model, input_ids, attention_mask, max_new_tokens: int
     _hclm_cp_set_global(hclm_cp)
 
     SparseContext.clear_group_plan()
-    if _env_flag("SPARSE_MOE_INFINITY_POLICY", "0"):
-        SparseContext.begin_moe_infinity_sequence()
 
     SparseContext.current_phase = "prefill"
     SparseContext.begin_runtime_call(0)
@@ -18795,8 +18339,6 @@ def greedy_decode_profiled(model, input_ids, attention_mask, max_new_tokens: int
                 use_cache=True,
                 return_dict=True,
             )
-        if SparseContext.promoe_runtime is not None:
-            SparseContext.promoe_runtime.drain()
         if measure_ttft:
             torch.cuda.synchronize(env.device)
     _phase_trace("PREFILL_END")
@@ -18808,10 +18350,6 @@ def greedy_decode_profiled(model, input_ids, attention_mask, max_new_tokens: int
     metrics.wall_prefill_ms = wt() * 1000.0
     _consume_skvs_accounting(metrics)
 
-    if _env_flag("SPARSE_MOE_INFINITY_POLICY", "0"):
-        SparseContext.select_moe_infinity_matched_eam(
-            max_history=_env_int("SPARSE_MOE_INFINITY_HISTORY_SIZE", 64),
-        )
 
     if _env_flag("SPARSE_PREFILL_DECODE_WARMUP", "0"):
         t_warmup = time.perf_counter()
@@ -18870,8 +18408,6 @@ def greedy_decode_profiled(model, input_ids, attention_mask, max_new_tokens: int
                 past_key_values=past,
                 return_dict=True,
             )
-            if SparseContext.promoe_runtime is not None:
-                SparseContext.promoe_runtime.drain()
         _phase_trace(f"DECODE_STEP_END step={call_id}")
         SparseContext.clear_oracle_runtime_active()
         SparseContext.end_oracle_call()
@@ -18904,8 +18440,6 @@ def greedy_decode_profiled(model, input_ids, attention_mask, max_new_tokens: int
         SparseContext.save_oracle_trace(env.rank)
 
     SparseContext.current_phase = "none"
-    if _env_flag("SPARSE_MOE_INFINITY_POLICY", "0"):
-        SparseContext.moe_infinity_matched_eam = None
     SparseContext.clear_group_plan()
     hclm_cp.close()
     _hclm_cp_set_global(_HCLMCPNoOp())
