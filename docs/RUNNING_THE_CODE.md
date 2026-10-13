@@ -5,7 +5,9 @@
 1. SPARSE runs without changing router-selected experts or combine weights.
 2. The main two-node matrix compares SPARSE and controlled baselines under
    matched model, requests, network, cache capacity, and token accounting.
-3. The component matrix isolates SCP, RS, EPIPE, and their combinations.
+3. The component matrix compares SCP, RS, EPIPE, and their combinations as
+   system paths. EPIPE-enabled paths also change the executor; separate
+   executor-matched launchers are provided for finer controls.
 4. Runtime counters expose demand H2D traffic, cache hits, prefetch usefulness,
    completion-before-use, and topology-weighted route cost.
 5. The reference plotting workflow regenerates four equal-canvas Qwen figures

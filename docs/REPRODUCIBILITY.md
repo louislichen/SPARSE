@@ -4,7 +4,7 @@
 
 - Two physical nodes, two GPUs per node, four distributed ranks, and EP=4.
 - FP16 model execution with CPU expert offload.
-- Homogeneous cache capacity: `8,8,8,8` experts per rank.
+- Homogeneous cache capacity: `8,8,8,8` experts per rank per MoE layer.
 - RS prefetch budget: M=2; predictor candidate depth: K=4.
 - RS admission thresholds per rank: minimum score 0.04, replacement advantage
   0.08, replacement margin 1.20, and one-step recent-expert protection.
@@ -41,6 +41,10 @@ MODEL_NUM_EXPERTS=64
 Each model requires its own routing profile, RS checkpoints, and SCP placement.
 Do not reuse Qwen profiles, checkpoints, or placements for DeepSeek or vice versa.
 
+`MODEL_NUM_LAYERS=27` counts Transformer layers for DeepSeek. Its first layer is
+dense; profiling, training, and validation use the manifest's `moe_layer_indices`
+to identify its 26 MoE layers.
+
 ## Request Subsets
 
 Create three mutually exclusive C4 subsets:
@@ -66,8 +70,11 @@ validation metrics.
 
 `profile_scp.sh` collects prefill routing traces from round-robin execution on
 the physical four-rank topology. Node 0 gathers rank-local files and merges
-train and validation profiles. `solve_scp.sh` runs the frozen replicated SCP
-objective and emits `placement.json` plus compact offline metrics.
+train and validation profiles. `solve_scp.sh` selects the replicated SCP objective.
+The current release is missing `scripts/scp_cache_replay.py`, which this objective
+requires. Full SCP regeneration is pending restoration of that helper. Runtime
+runs with supplied placements do not invoke it. Ordinary C4 profile merging does
+not require the optional TaskLocal extension.
 
 For full profile regeneration, expect many hours because 320 distributed shards
 load and execute the model. Runtime-only evaluation with supplied offline files is
@@ -115,5 +122,29 @@ Before accepting a row, verify:
 - identical token-count mode and world size;
 - no missing distributed rank and no NCCL timeout.
 
-The compact CSVs in `results/reference/` contain only audited aggregate values,
-not raw traces or machine-identifying paths.
+Runtime aggregation uses `e2e_output_tok_s` and its matching standard deviation.
+The legacy `throughput_tok_s` includes prompt tokens; the aggregator rejects
+summaries that only contain that field. Compact reference CSVs are retained
+without numerical edits. Their measurement provenance and uncertainty require
+the original per-run summaries; replotting these tables does not audit the
+underlying measurements.
+
+An unavailable standard deviation is left blank; a single request group does
+not imply zero uncertainty. Total expert-weight H2D is demand plus prefetch
+bytes. EPIPE staged-demand bytes are already included in demand and must not be
+added a second time. Demand-only reductions do not establish total-byte savings.
+
+`PREFETCH_TOP_M` and `PREDICTION_TOP_K` propagate to every rank. Optional
+`PREFETCH_TOP_M_BY_RANK` and `PREDICTION_TOP_K_BY_RANK` override individual rank
+budgets; effective vectors are saved in `case_config.json`.
+
+RS profile paths resolve relative to the profile directory, with default
+subdirectories used for missing or empty manifest paths. The training launcher
+validates chunks before starting DDP.
+
+RS training loads the same paired records on each rank and shards training only
+through `DistributedSampler`. Evaluation partitions records without padding;
+residual-model logits pass through DDP's forward call. CPU tests check record
+coverage and compare two-rank gradients with a global-batch reference. These
+fixes require retraining and GPU measurements before making new claims about
+prediction quality or throughput.

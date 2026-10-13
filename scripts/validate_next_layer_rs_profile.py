@@ -17,14 +17,14 @@ def _load_manifest(base: Path) -> Dict[str, object]:
 
 def _resolve_dir(base: Path, raw: str, fallback_name: str) -> Path:
     p = Path(raw)
-    if p.exists():
-        return p
-    if not p.is_absolute() and (base / p).exists():
+    if raw and not p.is_absolute() and (base / p).exists():
         return base / p
+    if raw and p.exists():
+        return p
     fallback = base / fallback_name
     if fallback.exists():
         return fallback
-    return p
+    return p if raw else fallback
 
 
 def _sorted_files(pattern: str) -> List[Path]:
@@ -69,7 +69,7 @@ def main() -> None:
         import torch as torch_mod
 
     errors: List[str] = []
-    for layer in range(num_layers):
+    for layer in manifest.get("moe_layer_indices", range(num_layers)):
         input_files = _sorted_files(str(rs_dir / f"rs_inputs_l{layer}_chunk_*.pt"))
         label_files = _sorted_files(str(rs_dir / f"rs_labels_l{layer}_chunk_*.pt"))
         if len(input_files) == 0:

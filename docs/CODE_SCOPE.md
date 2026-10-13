@@ -23,6 +23,8 @@ The following research-workspace material is deliberately absent:
 - model weights, datasets, checkpoints, profiles, traces, and raw logs;
 - machine-specific YAML files, SSH aliases, IP addresses, usernames, and paths.
 
-All release-facing behavior is covered by `scripts/validate_release.sh`, which
-also scans for private infrastructure strings and accidentally included binary
-files.
+`scripts/validate_release.sh` checks shell syntax, Python compilation, available
+CPU tests, private infrastructure strings, and accidentally included binary
+files. It does not verify CUDA execution or the complete offline pipeline.
+Training tests require PyTorch and otherwise report skips. The missing SCP
+cache-replay dependency is documented in `REPRODUCIBILITY.md`.

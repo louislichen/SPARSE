@@ -13,6 +13,10 @@ done
 mkdir -p "${RS_DIR}"
 
 cd "${ROOT}"
+"${PYTHON_BIN}" scripts/validate_next_layer_rs_profile.py \
+  --profile-base-dir "${RS_PROFILE_DIR}" \
+  --check-load
+
 CUDA_VISIBLE_DEVICES="${RS_TRAIN_CUDA_VISIBLE_DEVICES:-0,1}" \
 "${PYTHON_BIN}" -m torch.distributed.run \
   --standalone \
@@ -35,10 +39,6 @@ CUDA_VISIBLE_DEVICES="${RS_TRAIN_CUDA_VISIBLE_DEVICES:-0,1}" \
   --target-mode uniform_multihot \
   --loss-mode ce \
   --seed 42
-
-"${PYTHON_BIN}" scripts/validate_next_layer_rs_profile.py \
-  --profile-base-dir "${RS_PROFILE_DIR}" \
-  --check-load
 
 checkpoint_count="$(find "${RS_DIR}" -maxdepth 1 -name 'rs_l*_inL*.pth' -type f | wc -l | tr -d ' ')"
 if [[ "${checkpoint_count}" == "0" ]]; then

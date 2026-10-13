@@ -23,13 +23,19 @@ def find_rows(root: Path) -> list[dict[str, Any]]:
         if not summary_path.is_file():
             continue
         summary = load_json(summary_path)
+        if "e2e_output_tok_s" not in summary:
+            raise ValueError(
+                f"{summary_path}: missing e2e_output_tok_s; rerun with the current "
+                "runtime. Legacy throughput_tok_s includes prompt tokens and "
+                "cannot be used as generated-token E2E throughput."
+            )
         rows.append(
             {
                 **config,
-                "e2e_tok_s": float(summary["throughput_tok_s"]),
+                "e2e_tok_s": float(summary["e2e_output_tok_s"]),
                 "decode_tok_s": float(summary["decode_throughput_tok_s"]),
-                "e2e_repeat_sd": float(summary.get("throughput_tok_s_std", 0.0)),
-                "decode_repeat_sd": float(summary.get("decode_throughput_tok_s_std", 0.0)),
+                "e2e_repeat_sd": float(summary["e2e_output_tok_s_std"]) if summary.get("e2e_output_tok_s_std") is not None else "",
+                "decode_repeat_sd": float(summary["decode_throughput_tok_s_std"]) if summary.get("decode_throughput_tok_s_std") is not None else "",
                 "summary": str(summary_path.relative_to(root)),
             }
         )
@@ -74,9 +80,9 @@ def aggregate(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "method": method,
                 "request_groups": len(group),
                 "e2e_tok_s_mean": e2e_mean,
-                "e2e_tok_s_group_sd": statistics.stdev(e2e) if len(e2e) > 1 else 0.0,
+                "e2e_tok_s_group_sd": statistics.stdev(e2e) if len(e2e) > 1 else "",
                 "decode_tok_s_mean": decode_mean,
-                "decode_tok_s_group_sd": statistics.stdev(decode) if len(decode) > 1 else 0.0,
+                "decode_tok_s_group_sd": statistics.stdev(decode) if len(decode) > 1 else "",
                 "e2e_gain_vs_rr_pct": ((e2e_mean / base[0]) - 1.0) * 100.0 if base else "",
                 "decode_gain_vs_rr_pct": ((decode_mean / base[1]) - 1.0) * 100.0 if base else "",
             }

@@ -86,8 +86,9 @@ class RoutingScoutResidualMLP(nn.Module):
         h = self.blocks(h)
         return self.head(self.out_norm(h))
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return torch.softmax(self.forward_logits(x), dim=-1)
+    def forward(self, x: torch.Tensor, *, return_logits: bool = False) -> torch.Tensor:
+        logits = self.forward_logits(x)
+        return logits if return_logits else torch.softmax(logits, dim=-1)
 
 
 def _ddp_enabled() -> bool:
@@ -154,22 +155,14 @@ def _resolve_profile_subdir(profile_base_dir: str, manifest_value: object, fallb
     base = Path(profile_base_dir)
     raw = str(manifest_value or "")
     p = Path(raw)
-    if p.exists():
-        return p
-    if raw and (base / p).exists():
+    if raw and not p.is_absolute() and (base / p).exists():
         return base / p
+    if raw and p.exists():
+        return p
     fallback = base / fallback_name
     if fallback.exists():
         return fallback
-    return p
-
-
-def _shard_by_rank(items: List[Tuple[str, str]], rank: int, world: int) -> List[Tuple[str, str]]:
-    if len(items) == 0:
-        return []
-    if len(items) < world:
-        return [items[rank % len(items)]]
-    return [x for i, x in enumerate(items) if i % world == rank]
+    return p if raw else fallback
 
 
 def _paired_files(rs_dir: Path, source_layer: int, target_layer: int) -> List[Tuple[str, str]]:
@@ -206,7 +199,9 @@ def _load_pair_dataset(
     pairs = _paired_files(rs_dir, source_layer, target_layer)
     if len(pairs) == 0:
         raise FileNotFoundError(f"No paired chunks for source L{source_layer} -> target L{target_layer} in {rs_dir}")
-    pairs = _shard_by_rank(pairs, rank, world)
+    # All ranks must split the same records. DistributedSampler below is the
+    # only training shard; sharding files here would discard records twice and
+    # could give DDP ranks different numbers of backward calls.
     src_label_by_chunk: Dict[int, str] = {}
     if feature_mode == "hidden_router_topk":
         src_label_files = _sorted_chunk_files(str(rs_dir / f"rs_labels_l{source_layer}_chunk_*.pt"))
@@ -300,7 +295,11 @@ def _split_dataset(x: torch.Tensor, y: torch.Tensor, idx: torch.Tensor, seed: in
 
 
 def _make_loader(dataset: TensorDataset, batch_size: int, rank: int, world: int, shuffle: bool) -> DataLoader:
-    sampler = DistributedSampler(dataset, num_replicas=world, rank=rank, shuffle=shuffle) if world > 1 else None
+    sampler = None
+    if world > 1:
+        # Training pads to equal backward counts. Evaluation uses the raw model
+        # and may have unequal counts, so do not duplicate validation records.
+        sampler = DistributedSampler(dataset, num_replicas=world, rank=rank, shuffle=True) if shuffle else range(rank, len(dataset), world)
     return DataLoader(
         dataset,
         batch_size=int(batch_size),
@@ -319,7 +318,8 @@ def _multi_positive_ce(pred_probs: torch.Tensor, target_dist: torch.Tensor) -> t
 def _model_probs_logits(model: nn.Module, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     raw_model = model.module if isinstance(model, DDP) else model
     if hasattr(raw_model, "forward_logits"):
-        logits = raw_model.forward_logits(x)
+        # Call through DDP.forward so its reducer prepares gradient reduction.
+        logits = model(x, return_logits=True)
         return torch.softmax(logits, dim=-1), logits
     probs = model(x)
     return probs, torch.log(probs.clamp_min(1e-8))
@@ -460,6 +460,10 @@ def _train_one_pair(
     world: int,
     device: torch.device,
 ) -> Optional[Dict[str, object]]:
+    pair_seed = int(args.seed) + source_layer * 1009 + target_layer
+    torch.manual_seed(pair_seed)
+    if device.type == "cuda":
+        torch.cuda.manual_seed_all(pair_seed)
     X, Y, I = _load_pair_dataset(
         rs_dir,
         source_layer,
@@ -479,7 +483,7 @@ def _train_one_pair(
             print(f"[Skip] L{source_layer}->L{target_layer}: some rank has no data", flush=True)
         return None
 
-    train_set, val_set, test_set = _split_dataset(X, Y, I, seed=int(args.seed) + source_layer * 1009 + target_layer)
+    train_set, val_set, test_set = _split_dataset(X, Y, I, seed=pair_seed)
     train_loader = _make_loader(train_set, int(args.batch_size), rank, world, shuffle=True)
     val_loader = _make_loader(val_set, int(args.batch_size), rank, world, shuffle=False)
     test_loader = _make_loader(test_set, int(args.batch_size), rank, world, shuffle=False)
@@ -661,7 +665,13 @@ def main() -> None:
     num_layers = int(manifest["num_layers"])
     lead = int(args.lead_layers)
     end_src = int(args.end_source_layer) if int(args.end_source_layer) >= 0 else num_layers - lead
-    source_layers = list(range(int(args.start_source_layer), int(end_src)))
+    moe_layers = set(int(l) for l in manifest.get("moe_layer_indices", range(num_layers)))
+    source_layers = [
+        l for l in range(int(args.start_source_layer), int(end_src))
+        if l in moe_layers and l + lead in moe_layers
+    ]
+    if not source_layers:
+        raise ValueError("No adjacent MoE-layer pairs in the requested range")
 
     if rank == 0:
         with open(output_dir / "train_config.json", "w", encoding="utf-8") as f:

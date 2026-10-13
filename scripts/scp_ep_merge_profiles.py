@@ -14,13 +14,18 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-try:
-    from scripts.task_locality import counts_by_rank_node
-except ModuleNotFoundError:
-    task_locality_dir = Path(__file__).resolve().parent
-    if str(task_locality_dir) not in sys.path:
-        sys.path.insert(0, str(task_locality_dir))
-    from task_locality import counts_by_rank_node
+def _task_counts(metadatas: List[Dict[str, Any]]) -> Dict[str, Any]:
+    # The formal C4 profiles do not use the optional task-local extension.
+    if not any(md.get("task_local_enabled") or md.get("task_local") for md in metadatas):
+        return {}
+    try:
+        from scripts.task_locality import counts_by_rank_node
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "Task-local profile merging requires the optional scripts/task_locality.py; "
+            "ordinary C4 profiles do not require this extension."
+        ) from exc
+    return counts_by_rank_node(metadatas)
 
 
 def _load_metadata(data: np.lib.npyio.NpzFile) -> Dict[str, Any]:
@@ -353,7 +358,7 @@ def merge_profiles(input_dir: Path, out_path: Path) -> Dict[str, Any]:
     if request_records:
         base_meta["request_profile_records"] = request_records
         base_meta["request_profile_record_count"] = int(len(request_records))
-    task_counts = counts_by_rank_node(metadatas)
+    task_counts = _task_counts(metadatas)
     if task_counts.get("sampled_task_counts_by_rank"):
         base_meta.update(task_counts)
         base_meta["task_local_enabled"] = True
