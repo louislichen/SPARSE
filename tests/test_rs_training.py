@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import subprocess
 import sys
@@ -96,9 +97,14 @@ class RSTrainingTest(unittest.TestCase):
             profile = Path(tmp) / "profile"
             chunks = profile / "rs_decode_chunks"
             chunks.mkdir(parents=True)
+            model = Path(tmp) / "model"
+            model.mkdir()
+            config_path = model / "config.json"
+            config_path.write_text(json.dumps({"num_hidden_layers": 3, "hidden_size": 4}))
             (profile / "manifest.json").write_text(json.dumps({
                 "num_layers": 3, "moe_layer_indices": [1, 2], "num_experts_per_layer": 3,
-                "top_k": 1, "hidden_size": 4, "total_decode_records": 20}))
+                "top_k": 1, "hidden_size": 4, "total_decode_records": 20,
+                "provenance": {"model_files": {"config.json": hashlib.sha256(config_path.read_bytes()).hexdigest()}}}))
             for layer in (1, 2):
                 torch.save(torch.arange(80).reshape(20, 4).float() / 80,
                            chunks / f"rs_inputs_l{layer}_chunk_0.pt")
@@ -124,6 +130,19 @@ class RSTrainingTest(unittest.TestCase):
                             "--target-mode", "uniform_multihot", "--eval-ks", "1,2"],
                            cwd=root, check=True, capture_output=True, timeout=60)
             self.assertEqual([p.name for p in output.glob("*.pth")], ["rs_l2_inL1.pth"])
+            freeze = [sys.executable, "scripts/freeze_rs_bank.py", "--rs-dir", str(output),
+                      "--model-path", str(model)]
+            subprocess.run(freeze, cwd=root, check=True, capture_output=True, timeout=60)
+            frozen = json.loads((output / "bank_manifest.json").read_text())
+            self.assertEqual(frozen["trained_pairs"], [[1, 2]])
+            subprocess.run(freeze, cwd=root, check=True, capture_output=True, timeout=60)
+            checkpoint = output / "rs_l2_inL1.pth"
+            payload = torch.load(checkpoint, weights_only=True)
+            payload["state_dict"]["head.bias"][0] += 1
+            torch.save(payload, checkpoint)
+            rejected = subprocess.run(freeze, cwd=root, capture_output=True, timeout=60)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn(b"frozen bank changed", rejected.stderr)
 
     @unittest.skipUnless(torch is not None and dist.is_available() and dist.is_gloo_available(), "Gloo is required")
     def test_two_rank_gradients_match_global_batch(self):
