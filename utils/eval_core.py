@@ -520,6 +520,23 @@ def wall_timer_s():
 def tensor_nbytes(t: torch.Tensor) -> int:
     return int(t.numel() * t.element_size())
 
+def combine_expert_outputs(parts: torch.Tensor, expert_ids: torch.Tensor) -> torch.Tensor:
+    """Accumulate returned expert contributions in native expert-ID order.
+
+    Native Qwen MoE uses repeated input-dtype index_add in ascending expert ID.
+    A reduction over router slots can instead accumulate FP16/BF16 values in
+    FP32, producing a different rounding result that compounds across layers.
+    """
+    tokens, slots, hidden = parts.shape
+    if expert_ids.shape != (tokens, slots):
+        raise ValueError("expert output/ID shape mismatch")
+    order = torch.argsort(expert_ids, dim=1, stable=True)
+    result = parts.new_zeros((tokens, hidden))
+    rows = torch.arange(tokens, device=parts.device)
+    for slot in range(slots):
+        result.add_(parts[rows, order[:, slot]])
+    return result
+
 def kv_owner_by_position(pos_idx: torch.Tensor, world: int) -> torch.Tensor:
     return torch.remainder(pos_idx, world).to(torch.long)
 
@@ -3066,6 +3083,7 @@ class SparseContext:
         cls.logical_ngd_ep_reuse_once = False
         cls.current_phase = "none"
         cls.current_moe_layer_idx = None
+        cls.prefill_scp_transient_demoted_for_decode = False
         for _, blk in list(cls.layer_blocks.items()):
             reset_fn = getattr(blk, "reset_runtime_state_for_new_request", None)
             if callable(reset_fn):
@@ -3644,6 +3662,7 @@ def _load_runtime_rs_bank(
 class CacheEntry:
     payload: Any
     pinned: bool = False
+    hot: bool = False
     prefill_scp_transient: bool = False
 
 
@@ -4569,6 +4588,7 @@ class DistributedSparseMoeBlock(nn.Module):
         self.scp_dest_rank_by_node_cpu: Optional[List[List[int]]] = None
         self.local_expert_ids: List[int] = []
         self._local_eid_set = set()
+        self._light_policy = None
         self._rr_local_eid_set: set[int] = set(int(eid) for eid, r in enumerate(self.rr_expert_to_rank_cpu) if int(r) == int(self.comm_rank))
         self._rs_prefetch_eid_set: set[int] = set()
         self._scp_ep_replica_choice_cost_matrix: Optional[List[List[float]]] = None
@@ -6084,6 +6104,8 @@ class DistributedSparseMoeBlock(nn.Module):
         RS admission gate progressively more conservative while keeping old
         resident weights.
         """
+        if self._light_policy is not None:
+            self._light_policy.reset()
         try:
             self._finalize_completed_prefetch_events(count_all=True)
         except Exception:
@@ -6354,6 +6376,36 @@ class DistributedSparseMoeBlock(nn.Module):
         # replicas are eligible only when they are the always-valid RR fallback.
         return False, False, False
 
+    def _light_ready_target(self, eid: int, source: int):
+        policy = self._light_policy
+        if (policy is None or not policy.route or source != self.comm_rank
+                or eid not in policy.local_candidates):
+            return None
+        ready, cached, prefetched = self._resolve_replica_ready_for_rank(eid, self.comm_rank)
+        if not ready:
+            return None
+        return ResolveResult(target_rank=self.comm_rank, mode="light_local_ready",
+                             rr_owner=self.rr_expert_to_rank_cpu[eid], used_scp_replica=True,
+                             target_ready=True, route_cost=self._topology_route_cost(source, self.comm_rank),
+                             cache_ready=cached, prefetch_ready=prefetched)
+
+    def _light_destinations(self, flat_i):
+        policy = self._light_policy
+        start = time.perf_counter()
+        ready = tuple(sorted(eid for eid in self._cache.resident_ids()
+                             if eid in policy.local_candidates and self._local_prefetch_ready(eid)))
+        if ready != policy.route_key:
+            table = self.rr_expert_to_rank
+            if ready:
+                table = table.clone()
+                table[torch.tensor(ready, device=self.device)] = self.comm_rank
+            policy.route_key, policy.route_table = ready, table
+            policy.stats['route_table_rebuilds'] += 1
+        result = policy.route_table[flat_i]
+        policy.stats['route_calls'] += 1
+        policy.stats['route_host_ms'] += (time.perf_counter() - start) * 1000
+        return result
+
     def resolve_execution_rank(
         self,
         layer_idx: int,
@@ -6371,6 +6423,10 @@ class DistributedSparseMoeBlock(nn.Module):
         rr_owner = int(self.rr_expert_to_rank_cpu[eid]) if 0 <= eid < len(self.rr_expert_to_rank_cpu) else int(eid % max(int(self.comm_world), 1))
         st = str(stage or self._current_stage()).strip().lower()
         before_cost = float(self._topology_route_cost(src, rr_owner))
+        if st == "decode":
+            local = self._light_ready_target(eid, src)
+            if local is not None:
+                return local
         if self.placement_mode != "scp_ep" or not (0 <= eid < int(self.num_experts)):
             return ResolveResult(
                 target_rank=rr_owner,
@@ -6576,6 +6632,10 @@ class DistributedSparseMoeBlock(nn.Module):
         rr_owner = int(self.rr_expert_to_rank_cpu[eid]) if 0 <= eid < len(self.rr_expert_to_rank_cpu) else int(eid % max(int(self.comm_world), 1))
         st = str(stage or self._current_stage()).strip().lower()
         before_cost = float(self._topology_route_cost(src, rr_owner))
+        if st == "decode":
+            local = self._light_ready_target(eid, src)
+            if local is not None:
+                return local
         if self.placement_mode != "scp_ep" or not (0 <= eid < int(self.num_experts)):
             return ResolveResult(
                 target_rank=rr_owner,
@@ -6680,6 +6740,8 @@ class DistributedSparseMoeBlock(nn.Module):
         st = self._current_stage() if stage is None else str(stage or "").strip().lower()
         if flat_i.numel() == 0:
             return torch.empty_like(flat_i, dtype=torch.long, device=self.device)
+        if st == "decode" and self._light_policy is not None and self._light_policy.route:
+            return self._light_destinations(flat_i)
         use_decode_cache_aware = st == "decode" and bool(getattr(self, "decode_cache_aware_scp", False))
         if self.placement_mode == "scp_ep" and self._stage_uses_scp(st) and not use_decode_cache_aware:
             table = self._scp_dest_rank_table_for_stage(st)
@@ -10360,6 +10422,8 @@ class DistributedSparseMoeBlock(nn.Module):
                 budget=budget,
             )
         score_map = self._build_target_layer_prob_score_map(topi, topv)
+        if self._light_policy is not None and str(SparseContext.current_phase) == "decode":
+            score_map = self._light_policy.scores(score_map, set(self._cache.resident_ids()))
         return self._build_prefetch_plan_from_score_map(score_map, protect_ids=protect_ids, budget=budget)
 
     def _admit_prefetch_plan(self, plan: List[Tuple[int, Optional[int]]], *, group_end: int) -> None:
@@ -10923,6 +10987,10 @@ class DistributedSparseMoeBlock(nn.Module):
             return
 
         pred_k = min(int(pred.shape[-1]), int(target_blk._rs_prefetch_predict_topk()))
+        if target_blk._light_policy is not None:
+            policy = target_blk._light_policy
+            source_cost = policy.profile.cost(self.comm_rank, source_layer)
+            policy.window_ms = source_cost.compute(self.top_k, int(x.shape[0]) * self.top_k) + policy.cost.attention
         topv, topi = torch.topk(pred, k=pred_k, dim=-1)
         if self.norm_topk_prob:
             topv = topv / topv.sum(dim=-1, keepdim=True).clamp_min(1e-12)
@@ -12223,6 +12291,9 @@ class DistributedSparseMoeBlock(nn.Module):
                     demand_indices.append(int(idx))
 
             ready_items = int(sum(int(segments[i][2]) - int(segments[i][1]) for i in ready_indices))
+            policy = self._light_policy
+            if policy is not None:
+                policy.observe_ready(len(ready_indices), ready_items)
             self._record_epipe_counter("epipe_rs_residual_scan_ready_group_count", len(ready_indices))
             self._record_epipe_counter("epipe_rs_residual_scan_ready_item_count", ready_items)
             self._record_epipe_counter("epipe_rs_buffered_ready_group_count", len(ready_indices))
@@ -12240,6 +12311,13 @@ class DistributedSparseMoeBlock(nn.Module):
             elif demand_indices and self._epipe_rs_demand_stage_gate_open(ready_items):
                 residual_idx = int(demand_indices[0])
                 residual_kind = "demand"
+
+            if policy is not None and policy.feedback:
+                demand = demand_indices if self._epipe_rs_demand_stage_gate_open(ready_items) else []
+                candidates = [(i, int(segments[i][0]), "late") for i in late_indices]
+                candidates.extend((i, int(segments[i][0]), "demand") for i in demand)
+                selected = policy.residual(len(ready_indices), ready_items, candidates)
+                residual_idx, residual_kind = selected if selected is not None else (None, "")
 
             if residual_idx is None:
                 self._record_epipe_counter("epipe_decode_rs_skipped_no_miss_count", 1)
@@ -14754,7 +14832,7 @@ class DistributedSparseMoeBlock(nn.Module):
             cp.record_component(step_id, int(self.layer_idx), "gather_comm", cp_gather_start, cp_gather_end)
         unsorted = torch.empty_like(gathered)
         unsorted[sort_idx] = gathered
-        return unsorted.view(T, K, H).sum(dim=1)
+        return combine_expert_outputs(unsorted.view(T, K, H), idx)
 
     def _experts_ep_group(self, x: torch.Tensor, idx: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
         if self.topology is None or self.comm_group is None:
@@ -14951,7 +15029,7 @@ class DistributedSparseMoeBlock(nn.Module):
             cp.record_component(step_id, int(self.layer_idx), "gather_comm", cp_gather_start, cp_gather_end)
         unsorted = torch.empty_like(gathered)
         unsorted[sort_idx] = gathered
-        return unsorted.view(T, K, H).sum(dim=1)
+        return combine_expert_outputs(unsorted.view(T, K, H), idx)
 
     def _experts_ep_group_rank_grouped(self, x: torch.Tensor, idx: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
         """
@@ -17636,7 +17714,26 @@ class ModelBundle:
     dp_size: int = 1
 
 
+def install_lightweight_policies(profile, *, prefetch=True, route=True, feedback=True):
+    """Prepare local constants once; serving adds no distributed state exchange."""
+    from utils.lightweight_policy import LocalPolicy
+    if SparseContext.rs_bank_layout != "next_layer" or SparseContext.rs_bank_task != "router_prob":
+        raise ValueError("local readiness policy currently requires adjacent-layer probability RS")
+    for layer, block in SparseContext.layer_blocks.items():
+        sizes = {eid: block._epipe_estimate_expert_nbytes(eid) for eid in block._local_eid_set}
+        local_cost = block._topology_route_cost(block.comm_rank, block.comm_rank)
+        candidates = {eid for eid in sizes if block.rr_expert_to_rank_cpu[eid] != block.comm_rank
+                      and local_cost < block._topology_route_cost(block.comm_rank, block.rr_expert_to_rank_cpu[eid])}
+        block._light_policy = LocalPolicy(profile, block.comm_rank, layer, sizes, candidates,
+                                          prefetch=prefetch, route=route, feedback=feedback)
+
+
 def build_model_and_tokenizer(cfg: CoreBuildConfig, env: DistEnv, metrics=None) -> ModelBundle:
+    light_enabled = _env_flag("SPARSE_LIGHT_ENABLE", "0")
+    if light_enabled and (cfg.routing_mode != "router" or cfg.expert_source != "router"
+                          or cfg.planner_mode != "rs_prefetch" or cfg.expert_offload != "cpu"
+                          or cfg.cache_policy != "lru" or cfg.oracle_mode != "none" or cfg.enable_skvs):
+        raise ValueError("local readiness policy requires original router, RS prefetch, CPU offload, LRU and no oracle/SKVS")
     dtype = torch.float16 if cfg.dtype == "float16" else torch.bfloat16
     topology = build_dist_topology(
         env,
@@ -18032,16 +18129,44 @@ def build_model_and_tokenizer(cfg: CoreBuildConfig, env: DistEnv, metrics=None) 
             flush=True,
         )
 
-    # 正常情况下，每个 rank 都应该有几 GB 的模型显存；<1000MB 基本就说明没真正落卡
-    bad_ranks = [i for i, mb in enumerate(all_alloc_mb) if mb < 1000.0]
+    # Check the tensors that must be resident rather than assuming a minimum
+    # model size: a valid small MoE can occupy much less than one GB.
+    resident_modules = [("embed_tokens", model.model.embed_tokens), ("norm", model.model.norm)]
+    if lm_head_on_cuda:
+        resident_modules.append(("lm_head", model.lm_head))
+    for i, layer in enumerate(model.model.layers):
+        for name in ("self_attn", "input_layernorm", "post_attention_layernorm"):
+            resident_modules.append((f"layers.{i}.{name}", getattr(layer, name)))
+        if isinstance(layer.mlp, DistributedSparseMoeBlock):
+            for name in ("gate", "shared_expert", "shared_expert_gate", "shared_experts"):
+                module = getattr(layer.mlp, name, None)
+                if module is not None:
+                    resident_modules.append((f"layers.{i}.mlp.{name}", module))
+        else:
+            resident_modules.append((f"layers.{i}.mlp", layer.mlp))
+    misplaced = [f"{name}.{key}: {tensor.device}" for name, module in resident_modules
+                 for key, tensor in list(module.named_parameters()) + list(module.named_buffers())
+                 if tensor.device != env.device]
+    local_ready = torch.tensor([int(not misplaced and alloc_mb > 0)], device=env.device)
+    all_ready = [torch.empty_like(local_ready) for _ in range(env.world)]
+    dist.all_gather(all_ready, local_ready)
+    bad_ranks = [i for i, ready in enumerate(all_ready) if not bool(ready.item())]
     if len(bad_ranks) > 0:
         raise RuntimeError(
             f"Some ranks did not materialize model on their local GPU: bad_ranks={bad_ranks}, "
-            f"alloc_mb={all_alloc_mb}"
+            f"alloc_mb={all_alloc_mb}, local_misplaced={misplaced[:16]}"
         )
 
     if env.rank == 0:
         print(f"[Runtime] {cfg.runtime_mode} forward active", flush=True)
+
+    if light_enabled:
+        from utils.lightweight_policy import CostProfile
+        path = os.environ.get("SPARSE_LIGHT_COST_PROFILE", "").strip()
+        if not path:
+            raise ValueError("local readiness policy requires SPARSE_LIGHT_COST_PROFILE")
+        first = next(iter(SparseContext.layer_blocks.values()))
+        install_lightweight_policies(CostProfile(path, first.comm_world))
 
     return ModelBundle(
         model=model,
