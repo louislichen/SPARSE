@@ -8,7 +8,8 @@ baselines remain in the separate local experiment workspace.
 
 The prototype shares a decision model between execution placement, prefetch
 admission, and EPIPE residual selection. No paper results or reference tables
-have been changed. Real-model CUDA and multi-node performance validation is pending.
+have been changed. CUDA functional smoke checks have passed; calibrated
+performance and multi-node validation are pending.
 
 ## Algorithm
 
@@ -134,6 +135,40 @@ memory/protection guards, legal placement and determinism. Two-process Gloo chec
 exercise the actual early-RS hook and resolver, unequal budgets, an empty source,
 state reset, and EP dispatch/return with the actual modulelist/fused arithmetic.
 IDs/weights remain unchanged and outputs match direct weighted-expert evaluation.
+
+CUDA functional checks also passed on one H100 (EP=1) and two RTX 4090 GPUs
+(EP=2, NCCL) with a three-layer Qwen2-MoE fixture. Independent scheduling,
+joint scheduling, fixed placement and disabled EPIPE feedback all matched
+native Transformers logits within FP16 tolerance and gave identical next-token
+argmax values under the same cached input sequence. The two-GPU run exercised
+replica route changes and residual EPIPE choices. EP=1 does not test replica
+placement or distributed EPIPE. These checks use untrained RS fixtures and
+illustrative costs, and establish correctness rather than a performance gain.
+
+Reproduce on an idle pair of GPUs with Transformers 4.44.2 and CUDA PyTorch:
+
+```bash
+SMOKE_DIR=results/local/gpu-smoke
+python scripts/gpu_smoke.py prepare --directory "$SMOKE_DIR" --world-size 2
+CUDA_VISIBLE_DEVICES=0,1 OMP_NUM_THREADS=1 python -m torch.distributed.run \
+  --standalone --nproc_per_node=2 scripts/gpu_smoke.py run \
+  --directory "$SMOKE_DIR" --out-dir results/local/gpu-smoke-report
+```
+
+Use a fresh directory for each preparation. `prepare --model-path MODEL_DIR`
+reuses an existing Qwen2-MoE model without downloading weights; it still creates
+untrained predictor fixtures. The report records each rank, repeat, control
+counters and numerical differences. Warmup and each measured repeat start with
+request metadata reset and cold expert caches. The smoke bypasses the frozen
+four-rank paper launcher; it does not change that evaluation protocol.
+
+The deployment checks exposed two shared runtime issues: cache construction
+passed a missing `hot` field, and ordinary EP combined returned contributions
+with a reduction that rounded differently from native Qwen's sequential
+expert-ID accumulation. Both are fixed in this research branch and shared by
+its independent/joint controls. The preserved tag and `main` remain unchanged.
+GPU materialization now checks mandatory resident tensors directly instead of
+rejecting valid models below a fixed one-GB allocation threshold.
 
 This is a host-side Python prototype with synchronous state exchange. Calibrate
 costs, verify CUDA events/cache lifetimes, measure control and metadata overhead,

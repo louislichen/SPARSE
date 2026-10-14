@@ -520,6 +520,24 @@ def wall_timer_s():
 def tensor_nbytes(t: torch.Tensor) -> int:
     return int(t.numel() * t.element_size())
 
+
+def combine_expert_outputs(parts: torch.Tensor, expert_ids: torch.Tensor) -> torch.Tensor:
+    """Accumulate returned expert contributions in native expert-ID order.
+
+    Native Qwen MoE uses repeated input-dtype index_add in ascending expert ID.
+    A reduction over router slots can instead accumulate FP16/BF16 values in
+    FP32, producing a different rounding result that compounds across layers.
+    """
+    tokens, slots, hidden = parts.shape
+    if expert_ids.shape != (tokens, slots):
+        raise ValueError("expert output/ID shape mismatch")
+    order = torch.argsort(expert_ids, dim=1, stable=True)
+    result = parts.new_zeros((tokens, hidden))
+    rows = torch.arange(tokens, device=parts.device)
+    for slot in range(slots):
+        result.add_(parts[rows, order[:, slot]])
+    return result
+
 def kv_owner_by_position(pos_idx: torch.Tensor, world: int) -> torch.Tensor:
     return torch.remainder(pos_idx, world).to(torch.long)
 
@@ -3650,6 +3668,7 @@ def _load_runtime_rs_bank(
 class CacheEntry:
     payload: Any
     pinned: bool = False
+    hot: bool = False
     prefill_scp_transient: bool = False
 
 
@@ -14785,7 +14804,7 @@ class DistributedSparseMoeBlock(nn.Module):
             cp.record_component(step_id, int(self.layer_idx), "gather_comm", cp_gather_start, cp_gather_end)
         unsorted = torch.empty_like(gathered)
         unsorted[sort_idx] = gathered
-        return unsorted.view(T, K, H).sum(dim=1)
+        return combine_expert_outputs(unsorted.view(T, K, H), idx)
 
     def _experts_ep_group(self, x: torch.Tensor, idx: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
         if self.topology is None or self.comm_group is None:
@@ -14982,7 +15001,7 @@ class DistributedSparseMoeBlock(nn.Module):
             cp.record_component(step_id, int(self.layer_idx), "gather_comm", cp_gather_start, cp_gather_end)
         unsorted = torch.empty_like(gathered)
         unsorted[sort_idx] = gathered
-        return unsorted.view(T, K, H).sum(dim=1)
+        return combine_expert_outputs(unsorted.view(T, K, H), idx)
 
     def _experts_ep_group_rank_grouped(self, x: torch.Tensor, idx: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
         """
@@ -18089,12 +18108,32 @@ def build_model_and_tokenizer(cfg: CoreBuildConfig, env: DistEnv, metrics=None) 
             flush=True,
         )
 
-    # 正常情况下，每个 rank 都应该有几 GB 的模型显存；<1000MB 基本就说明没真正落卡
-    bad_ranks = [i for i, mb in enumerate(all_alloc_mb) if mb < 1000.0]
+    # Check the tensors that must be resident rather than assuming a minimum
+    # model size: a valid small MoE can occupy much less than one GB.
+    resident_modules = [("embed_tokens", model.model.embed_tokens), ("norm", model.model.norm)]
+    if lm_head_on_cuda:
+        resident_modules.append(("lm_head", model.lm_head))
+    for i, layer in enumerate(model.model.layers):
+        for name in ("self_attn", "input_layernorm", "post_attention_layernorm"):
+            resident_modules.append((f"layers.{i}.{name}", getattr(layer, name)))
+        if isinstance(layer.mlp, DistributedSparseMoeBlock):
+            for name in ("gate", "shared_expert", "shared_expert_gate", "shared_experts"):
+                module = getattr(layer.mlp, name, None)
+                if module is not None:
+                    resident_modules.append((f"layers.{i}.mlp.{name}", module))
+        else:
+            resident_modules.append((f"layers.{i}.mlp", layer.mlp))
+    misplaced = [f"{name}.{key}: {tensor.device}" for name, module in resident_modules
+                 for key, tensor in list(module.named_parameters()) + list(module.named_buffers())
+                 if tensor.device != env.device]
+    local_ready = torch.tensor([int(not misplaced and alloc_mb > 0)], device=env.device)
+    all_ready = [torch.empty_like(local_ready) for _ in range(env.world)]
+    dist.all_gather(all_ready, local_ready)
+    bad_ranks = [i for i, ready in enumerate(all_ready) if not bool(ready.item())]
     if len(bad_ranks) > 0:
         raise RuntimeError(
             f"Some ranks did not materialize model on their local GPU: bad_ranks={bad_ranks}, "
-            f"alloc_mb={all_alloc_mb}"
+            f"alloc_mb={all_alloc_mb}, local_misplaced={misplaced[:16]}"
         )
 
     if env.rank == 0:

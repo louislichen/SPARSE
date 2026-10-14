@@ -11,7 +11,8 @@ The independent implementation is preserved by tag `sparse-independent-v1`
 `research/joint-scheduling` branch adds an experimental shared planner for
 placement, prefetch admission and EPIPE residual handling. See
 [joint scheduling](docs/JOINT_SCHEDULING.md) for its cost model, matched controls
-and CPU validation status; GPU performance validation is pending.
+and validation status. CUDA correctness smoke checks have passed on H100 and
+two RTX 4090 GPUs; calibrated performance evaluation is pending.
 
 The release is intentionally whitelist-based. It includes the code paths used
 by the paper, deterministic launchers, offline-file preparation scripts, compact source
