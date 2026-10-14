@@ -2,7 +2,7 @@
 
 All methods share weights, router, RS, placement, cache and requests. Reference
 and optimized planners are switched between requests, with one cold-cache
-warmup per method and a balanced method order across measured rounds.
+warmup per method and shuffled method orders across measured rounds.
 """
 from __future__ import annotations
 

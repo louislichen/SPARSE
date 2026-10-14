@@ -12,7 +12,12 @@ The independent implementation is preserved by tag `sparse-independent-v1`
 placement, prefetch admission and EPIPE residual handling. See
 [joint scheduling](docs/JOINT_SCHEDULING.md) for its cost model, matched controls
 and validation status. CUDA correctness smoke checks have passed on H100 and
-two RTX 4090 GPUs; calibrated performance evaluation is pending.
+two RTX 4090 GPUs. The `research/joint-optimization` branch adds incremental
+cost evaluation and opt-in bounded search and combined metadata exchange. See
+[planner optimization](docs/JOINT_OPTIMIZATION.md) for the paired experiments:
+the joint prototype's overhead decreased, but it still trails the independent
+policy in the short pretrained-model diagnostic. Calibrated performance
+evaluation is pending.
 
 The release is intentionally whitelist-based. It includes the code paths used
 by the paper, deterministic launchers, offline-file preparation scripts, compact source

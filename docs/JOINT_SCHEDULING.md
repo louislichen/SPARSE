@@ -6,6 +6,10 @@ Development lives on `research/joint-scheduling`; `main` remains the preserved
 implementation. This branch contains SPARSE changes only. Comparison-system
 baselines remain in the separate local experiment workspace.
 
+Further implementation and matched overhead diagnostics live on
+`research/joint-optimization`; see [planner optimization](JOINT_OPTIMIZATION.md).
+The initial research branch and independent snapshot remain available.
+
 The prototype shares a decision model between execution placement, prefetch
 admission, and EPIPE residual selection. No paper results or reference tables
 have been changed. CUDA functional smoke checks have passed; calibrated
