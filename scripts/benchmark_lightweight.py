@@ -137,7 +137,8 @@ def main():
                     torch.testing.assert_close(actual,canonical,atol=args.atol,rtol=args.rtol)
                     if not torch.equal(actual.argmax(-1),canonical.argmax(-1)): raise AssertionError('independent argmax differs')
                 policy_stats=[p.summary() for p in policies[method] if p is not None]
-                traffic = {k:getattr(metrics,k,0) for k in ('comm_bytes_activation','comm_bytes_activation_inter_node',
+                traffic = {k:getattr(metrics,k,0) for k in ('comm_bytes_activation','comm_bytes_activation_remote',
+                    'comm_bytes_activation_intra_node','comm_bytes_activation_inter_node',
                     'expert_weight_h2d_bytes','expert_weight_h2d_prefetch_bytes','expert_weight_h2d_demand_bytes',
                     'cache_hit_count','cache_miss_count','epipe_rs_trigger_count')}
                 records[method].append(dict(repeat=repeat,decode_ms=elapsed[1:],prefill_ms=elapsed[0],
@@ -152,6 +153,7 @@ def main():
             args.out_dir.mkdir(parents=True,exist_ok=True)
             report=dict(purpose='local-policy engineering diagnostic; untrained RS, illustrative costs',
                 args=vars(args),fixture=fixture,ranks=all_records,orders=orders,
+                torch=str(torch.__version__),transformers=transformers.__version__,gpu=torch.cuda.get_device_name(),
                 source_sha256={p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest() for p in
                     ('utils/eval_core.py','utils/lightweight_policy.py','scripts/benchmark_lightweight.py')})
             (args.out_dir/'report.json').write_text(json.dumps(report,indent=2,default=str))

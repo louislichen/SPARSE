@@ -18171,7 +18171,10 @@ def build_model_and_tokenizer(cfg: CoreBuildConfig, env: DistEnv, metrics=None) 
         if not path:
             raise ValueError("local readiness policy requires SPARSE_LIGHT_COST_PROFILE")
         first = next(iter(SparseContext.layer_blocks.values()))
-        install_lightweight_policies(CostProfile(path, first.comm_world))
+        install_lightweight_policies(CostProfile(path, first.comm_world),
+                                     prefetch=_env_flag("SPARSE_LIGHT_PREFETCH", "1"),
+                                     route=_env_flag("SPARSE_LIGHT_ROUTE", "1"),
+                                     feedback=_env_flag("SPARSE_LIGHT_FEEDBACK", "1"))
 
     return ModelBundle(
         model=model,
