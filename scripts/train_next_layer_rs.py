@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import glob
+import hashlib
 import json
 import math
 import os
@@ -278,15 +279,45 @@ def _load_pair_dataset(
     return X, Y, I
 
 
-def _split_dataset(x: torch.Tensor, y: torch.Tensor, idx: torch.Tensor, seed: int) -> Tuple[TensorDataset, TensorDataset, TensorDataset]:
-    n = int(x.shape[0])
+def _split_indices(n: int, seed: int, groups: Optional[torch.Tensor] = None):
     g = torch.Generator().manual_seed(int(seed))
-    perm = torch.randperm(n, generator=g)
-    train_n = int(0.8 * n)
-    val_n = int(0.1 * n)
-    train_idx = perm[:train_n]
-    val_idx = perm[train_n:train_n + val_n]
-    test_idx = perm[train_n + val_n:]
+    if groups is None:
+        perm = torch.randperm(n, generator=g)
+        train_n, val_n = int(.8 * n), int(.1 * n)
+        return perm[:train_n], perm[train_n:train_n + val_n], perm[train_n + val_n:]
+    if groups.ndim != 1 or groups.numel() != n:
+        raise ValueError('sample IDs must align with every profile record')
+    unique = torch.unique(groups, sorted=True)
+    if len(unique) < 10:
+        raise ValueError('request-disjoint splitting requires at least ten profiled requests')
+    order = unique[torch.randperm(len(unique), generator=g)]
+    train_n, val_n = int(.8 * len(unique)), int(.1 * len(unique))
+    partitions = (order[:train_n], order[train_n:train_n + val_n], order[train_n + val_n:])
+    return tuple(torch.where(torch.isin(groups, part))[0] for part in partitions)
+
+
+def _profile_sample_ids(base, manifest):
+    trace_dir = _resolve_profile_subdir(base, manifest.get('trace_chunk_dir', ''), 'trace_chunks')
+    files = _sorted_chunk_files(str(trace_dir / 'decode_trace_chunk_*.pt'))
+    if not files:
+        raise ValueError('request-disjoint training needs decode traces with sample_ids')
+    rows = []
+    for filename in files:
+        trace = torch.load(filename, map_location='cpu', weights_only=True)
+        ids = trace.get('sample_ids')
+        if ids is None or ids.ndim != 1 or len(ids) != len(trace['layer_indices']):
+            raise ValueError(f'{filename}: missing or misaligned sample_ids; legacy profiles require explicit --split-unit row')
+        rows.append(ids.long())
+    ids = torch.cat(rows)
+    if len(ids) != int(manifest['total_decode_records']):
+        raise ValueError('trace record count differs from manifest')
+    return ids
+
+
+def _split_dataset(x: torch.Tensor, y: torch.Tensor, idx: torch.Tensor, seed: int,
+                   groups: Optional[torch.Tensor] = None) -> Tuple[TensorDataset, TensorDataset, TensorDataset]:
+    n = int(x.shape[0])
+    train_idx, val_idx, test_idx = _split_indices(n, seed, groups)
     return (
         TensorDataset(x[train_idx], y[train_idx], idx[train_idx]),
         TensorDataset(x[val_idx], y[val_idx], idx[val_idx]),
@@ -483,7 +514,9 @@ def _train_one_pair(
             print(f"[Skip] L{source_layer}->L{target_layer}: some rank has no data", flush=True)
         return None
 
-    train_set, val_set, test_set = _split_dataset(X, Y, I, seed=pair_seed)
+    # Use one request split for every layer. Pair-specific seeds initialize
+    # networks, not the train/validation/test partition.
+    train_set, val_set, test_set = _split_dataset(X, Y, I, seed=int(args.seed), groups=args.sample_ids)
     train_loader = _make_loader(train_set, int(args.batch_size), rank, world, shuffle=True)
     val_loader = _make_loader(val_set, int(args.batch_size), rank, world, shuffle=False)
     test_loader = _make_loader(test_set, int(args.batch_size), rank, world, shuffle=False)
@@ -591,6 +624,9 @@ def _train_one_pair(
             "best_epoch": int(best_epoch),
             "best_val": float(best_val),
             "metrics": test,
+            "split_sha256": args.split_sha256,
+            "profile_manifest_sha256": args.profile_manifest_sha256,
+            "profile_provenance": args.profile_provenance,
         }
         torch.save(payload, ckpt_path)
 
@@ -622,6 +658,8 @@ def main() -> None:
     ap.add_argument("--early-stop-patience", type=int, default=5)
     ap.add_argument("--eval-ks", type=str, default="1,2,4,8,12")
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--split-unit", choices=["request", "row"], default="request",
+                    help="Keep all decode steps of a request together; row is a legacy diagnostic only.")
     ap.add_argument("--cpu-fp32", action="store_true")
     ap.add_argument(
         "--feature-mode",
@@ -657,10 +695,22 @@ def main() -> None:
 
     rank, world, _, device = _setup_dist()
     output_dir = Path(args.output_dir)
+    if list(output_dir.glob('rs_l*_inL*.pth')):
+        raise ValueError('checkpoint output already contains weights; use a fresh versioned directory')
     if rank == 0:
         output_dir.mkdir(parents=True, exist_ok=True)
 
     manifest = _load_manifest(args.profile_base_dir)
+    args.sample_ids = _profile_sample_ids(args.profile_base_dir, manifest) if args.split_unit == 'request' else None
+    split_rows = _split_indices(int(manifest['total_decode_records']), args.seed, args.sample_ids)
+    split_data = dict(unit=args.split_unit, seed=args.seed,
+                      rows={name: values.tolist() for name, values in zip(('train','validation','test'), split_rows)})
+    if args.sample_ids is not None:
+        split_data['request_ids'] = {name: torch.unique(args.sample_ids[values]).tolist()
+                                    for name, values in zip(('train','validation','test'), split_rows)}
+    args.split_sha256 = hashlib.sha256(json.dumps(split_data, sort_keys=True).encode()).hexdigest()
+    args.profile_manifest_sha256 = hashlib.sha256((Path(args.profile_base_dir)/'manifest.json').read_bytes()).hexdigest()
+    args.profile_provenance = manifest.get('provenance', {})
     rs_dir = _resolve_profile_subdir(args.profile_base_dir, manifest.get("rs_chunk_dir", ""), "rs_decode_chunks")
     num_layers = int(manifest["num_layers"])
     lead = int(args.lead_layers)
@@ -675,7 +725,9 @@ def main() -> None:
 
     if rank == 0:
         with open(output_dir / "train_config.json", "w", encoding="utf-8") as f:
-            json.dump(vars(args) | {"manifest": manifest}, f, indent=2, ensure_ascii=False)
+            config = {key:value for key,value in vars(args).items() if key != 'sample_ids'}
+            json.dump(config | {"manifest": manifest}, f, indent=2, ensure_ascii=False)
+        (output_dir/'split.json').write_text(json.dumps(split_data, indent=2))
 
     rows: List[Dict[str, object]] = []
     for source_layer in source_layers:

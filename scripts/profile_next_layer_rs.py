@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import gc
 import gzip
+import hashlib
 import importlib.machinery
 import importlib.util
 import json
@@ -206,6 +207,8 @@ class NextLayerRSProfiler:
     def __init__(self, args: argparse.Namespace):
         self.args = args
         self.out_dir = Path(args.out_dir)
+        if (self.out_dir/'manifest.json').exists() or any(self.out_dir.glob('rs_decode_chunks/*.pt')):
+            raise ValueError('profile output already contains traces; use a fresh versioned directory')
         self.chunk_dir = self.out_dir / "rs_decode_chunks"
         self.trace_dir = self.out_dir / "trace_chunks"
         self.summary_dir = self.out_dir / "summary"
@@ -286,6 +289,18 @@ class NextLayerRSProfiler:
         self.layer_record_count = torch.zeros((self.num_layers,), dtype=torch.int64)
 
         self._register_gate_hooks()
+        model_dir = Path(args.model_path)
+        fingerprint_files = ('config.json', 'model.safetensors.index.json', 'tokenizer_config.json', 'tokenizer.json')
+        self.provenance = dict(
+            model_files={name:hashlib.sha256((model_dir/name).read_bytes()).hexdigest()
+                         for name in fingerprint_files if (model_dir/name).is_file()},
+            weight_file_metadata=[(p.name,p.stat().st_size,p.stat().st_mtime_ns)
+                                  for p in sorted(model_dir.glob('*.safetensors'))],
+            dataset_sha256=hashlib.sha256(Path(args.dataset).read_bytes()).hexdigest(),
+            input_feature='native MoE gate input hidden; FP16 capture, FP32 predictor input',
+            label='same-token next-layer native router top-k',
+            torch=str(torch.__version__), seed=int(args.seed),
+        )
 
     def _register_gate_hooks(self) -> None:
         hook_count = 0
@@ -593,6 +608,7 @@ class NextLayerRSProfiler:
             json.dump(json_summary, f, indent=2, ensure_ascii=False)
 
         manifest = {
+            "provenance": self.provenance,
             "schema": "next_layer_rs_v1",
             "rs_chunk_dir": str(self.chunk_dir),
             "trace_chunk_dir": str(self.trace_dir),

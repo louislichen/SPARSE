@@ -49,6 +49,17 @@ def _ddp_worker(rank, rendezvous):
 
 @unittest.skipIf(torch is None, "PyTorch is required for RS training checks")
 class RSTrainingTest(unittest.TestCase):
+    def test_request_split_keeps_decode_steps_together_and_layers_share_it(self):
+        groups = torch.arange(20).repeat_interleave(4)
+        parts = TRAIN._split_indices(len(groups), 42, groups)
+        sets = [set(groups[rows].tolist()) for rows in parts]
+        self.assertEqual([len(s) for s in sets], [16, 2, 2])
+        self.assertEqual(set.union(*sets), set(range(20)))
+        self.assertFalse(sets[0] & sets[1] or sets[0] & sets[2] or sets[1] & sets[2])
+        self.assertEqual(sum(len(rows) for rows in parts), len(groups))
+        again = TRAIN._split_indices(len(groups), 42, groups)
+        for actual, expected in zip(parts, again): torch.testing.assert_close(actual, expected)
+
     def test_records_are_sharded_once_with_equal_training_steps(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -97,7 +108,8 @@ class RSTrainingTest(unittest.TestCase):
             traces.mkdir()
             indices = torch.zeros(20, 3, 1).long()
             indices[:, 0] = -1
-            torch.save({"layer_indices": indices, "layer_weights": torch.ones(20, 3, 1)},
+            torch.save({"layer_indices": indices, "layer_weights": torch.ones(20, 3, 1),
+                        "sample_ids": torch.arange(10).repeat_interleave(2)},
                        traces / "decode_trace_chunk_0.pt")
             summary = profile / "summary"
             summary.mkdir()
