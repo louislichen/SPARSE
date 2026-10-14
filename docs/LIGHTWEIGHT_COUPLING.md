@@ -115,6 +115,17 @@ report; partially measured profiles must retain `calibrated=false` while any
 decision cost remains estimated. A trained RS bank alone does not turn an
 engineering diagnostic into a paper-scale performance result.
 
+For batch-one Qwen decode, `--native-decode-granularity` enables the shared
+executor option `SPARSE_EP_NATIVE_DECODE_GRANULARITY=1`. Ordinary EP can combine
+two ranks' one-token expert requests into a GEMM, whereas separate native requests
+use GEMV. In FP16, the resulting rounding may perturb later router choices.
+The option preserves each token's native module-expert forward call in both
+ordinary and staged EPIPE execution. It adds no communication or state snapshot,
+but may launch more expert kernels; every compared strategy must use the same
+option and report it. It applies to CPU-offloaded module experts with batch one
+and one-token decode, and defaults off. Other batching/expert layouts retain
+their existing execution. Calibrate per-item compute costs for this granularity.
+
 ## Current evidence
 
 Tested serving core is `f28c880`. Later commits add serving component switches,

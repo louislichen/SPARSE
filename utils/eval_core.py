@@ -4792,6 +4792,7 @@ class DistributedSparseMoeBlock(nn.Module):
         self.expert_to_node = torch.tensor(self.expert_to_node_cpu, dtype=torch.long, device=self.device)
 
         self.expert_offload = str(expert_offload)
+        self._native_decode_granularity = _env_flag("SPARSE_EP_NATIVE_DECODE_GRANULARITY", "0")
         if self.expert_offload not in ("cpu", "gpu"):
             raise ValueError(f"expert_offload must be cpu|gpu, got {self.expert_offload}")
 
@@ -11751,9 +11752,7 @@ class DistributedSparseMoeBlock(nn.Module):
             cp_ev_start.record(torch.cuda.current_stream(self.device))
         elif cp_sampled:
             cp_cpu_start = _hclm_cp_now_ns()
-        gate = F.linear(cur, gw)
-        up = F.linear(cur, uw)
-        y = F.linear(self.act_fn(gate) * up, dw)
+        y = self._module_expert_forward(cur, gw, uw, dw)
         if cp_cuda_timing:
             cp_ev_end.record(torch.cuda.current_stream(self.device))
             if cp_compute_events is not None:
@@ -11761,6 +11760,29 @@ class DistributedSparseMoeBlock(nn.Module):
         elif cp_sampled:
             cpu_ms += max(0.0, float(_hclm_cp_now_ns() - cp_cpu_start) / 1_000_000.0)
         return y * cur_w, float(cpu_ms)
+
+    def _module_expert_forward(self, cur, gw, uw, dw):
+        """Optionally retain native single-request decode GEMV arithmetic.
+
+        EP can merge two ranks' one-token requests into a larger expert GEMM.
+        FP16 kernel rounding can then perturb later router choices. This guard
+        keeps the native per-token arithmetic without changing router decisions.
+        It is a shared executor option, independent of scheduling policy.
+        """
+        native_items = (
+            bool(getattr(self, "_native_decode_granularity", False))
+            and self._current_stage() == "decode"
+            and int(getattr(self, "_current_forward_batch_size", 0)) == 1
+            and int(getattr(self, "_current_forward_seq_len", 0)) == 1
+            and cur.shape[0] > 1
+        )
+        def forward(inputs):
+            gate = F.linear(inputs, gw)
+            up = F.linear(inputs, uw)
+            return F.linear(self.act_fn(gate) * up, dw)
+        if native_items:
+            return torch.cat([forward(cur[row:row+1]) for row in range(cur.shape[0])], dim=0)
+        return forward(cur)
 
     def _epipe_compute_segment(
         self,
@@ -11825,9 +11847,7 @@ class DistributedSparseMoeBlock(nn.Module):
             cp_ev_start.record(torch.cuda.current_stream(self.device))
         elif cp_sampled:
             cp_cpu_start = _hclm_cp_now_ns()
-        gate = F.linear(cur, gw)
-        up = F.linear(cur, uw)
-        y = F.linear(self.act_fn(gate) * up, dw)
+        y = self._module_expert_forward(cur, gw, uw, dw)
         if cp_cuda_timing:
             cp_ev_end.record(torch.cuda.current_stream(self.device))
             if cp_compute_events is not None:

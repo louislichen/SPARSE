@@ -85,6 +85,7 @@ def main():
     parser.add_argument('--repeat', type=int, default=5)
     parser.add_argument('--num-requests', type=int, default=1)
     parser.add_argument('--rs-dir', type=Path)
+    parser.add_argument('--native-decode-granularity', action='store_true')
     parser.add_argument('--atol', type=float, default=.03)
     parser.add_argument('--rtol', type=float, default=.005)
     parser.add_argument('--cold-decode', action='store_true')
@@ -121,6 +122,7 @@ def main():
         if bank_manifest is not None and rs_hashes != bank_manifest['checkpoint_sha256']:
             raise ValueError('frozen RS weights changed')
         configure(directory)
+        os.environ['SPARSE_EP_NATIVE_DECODE_GRANULARITY'] = str(int(args.native_decode_granularity))
         metrics = Metrics()
         bundle = build_model_and_tokenizer(CoreBuildConfig(model_path=fixture['model_path'],
             scp_path=str(directory/'placement.json'), rs_dir=str(rs_path),

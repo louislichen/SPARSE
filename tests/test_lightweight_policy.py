@@ -61,7 +61,7 @@ class PolicyTests(unittest.TestCase):
 def methods(context):
     tree=ast.parse((ROOT/'utils/eval_core.py').read_text())
     block=next(n for n in tree.body if isinstance(n,ast.ClassDef) and n.name=='DistributedSparseMoeBlock')
-    names={'_light_destinations','_resolve_dest_for_flat_experts','_plain_ep_compute_segment'}
+    names={'_light_destinations','_resolve_dest_for_flat_experts','_plain_ep_compute_segment','_module_expert_forward'}
     nodes=[n for n in block.body if isinstance(n,ast.FunctionDef) and n.name in names]
     namespace=dict(torch=torch,F=F,time=time,SparseContext=context)
     module=ast.Module(body=[ast.ImportFrom(module='__future__',names=[ast.alias(name='annotations')],level=0)]+nodes,type_ignores=[])
@@ -94,6 +94,7 @@ def worker(rank,rendezvous,directory):
         block=Block(rank,CostProfile(Path(directory)/'costs.json',2)); context=SimpleNamespace(current_phase='decode')
         core=methods(context)
         block._light_destinations=lambda ids:core['_light_destinations'](block,ids)
+        block._module_expert_forward=lambda *args:core['_module_expert_forward'](block,*args)
         for empty_rank in (None,1):
             ids=torch.tensor([[0,1]]) if rank!=empty_rank else torch.empty((0,2),dtype=torch.long)
             weights=torch.tensor([[.3,.7]]) if ids.numel() else torch.empty((0,2))
