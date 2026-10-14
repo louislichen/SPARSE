@@ -10,6 +10,7 @@ __pycache__/
 models/
 datasets/
 offline_files/
+configs/local/
 results/local/
 results/runtime/
 results/offline/

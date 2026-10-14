@@ -35,6 +35,7 @@ class RunScriptTest(unittest.TestCase):
                         "NETWORK_LABEL=test",
                         "SCP_PATH=/offline/scp.json",
                         "RS_DIR=/offline/rs",
+                        "JOINT_COST_PROFILE=/offline/costs.json",
                         "REMOTE_SSH=review-node",
                         f"REMOTE_REPO={ROOT}",
                         "REMOTE_ENV_FILE=.env",
@@ -56,6 +57,7 @@ class RunScriptTest(unittest.TestCase):
             self.assertIn("--batch 4", completed.stdout)
             self.assertIn("--max-new 128", completed.stdout)
             self.assertIn("SPARSE_SIM_ENABLE_WEAKNET=0", completed.stdout)
+            self.assertIn("SPARSE_JOINT_ENABLE=0", completed.stdout)
             self.assertIn("SPARSE_RS_PREFETCH_TOP_M_BY_RANK=1\\,1\\,1\\,1", completed.stdout)
             self.assertIn("SPARSE_RS_PREFETCH_PRED_TOPK_BY_RANK=8\\,8\\,8\\,8", completed.stdout)
             config_path, = (tmp_path / "results").rglob("case_config.json")
@@ -81,6 +83,24 @@ class RunScriptTest(unittest.TestCase):
             )
             self.assertIn("METHODS='rr sparse'", launched.stdout)
             self.assertIn("WORKLOADS='b1'", launched.stdout)
+
+            for method, placement, feedback in [('sparse-joint', 1, 1),
+                                               ('joint-fixed-placement', 0, 1),
+                                               ('joint-no-epipe-feedback', 1, 0)]:
+                with self.subTest(method=method):
+                    result = subprocess.run(
+                        ['bash', str(ROOT / 'scripts/run/run_case.sh'), method, 'b4', '0'],
+                        check=True, cwd=ROOT,
+                        env={'PATH': '/usr/bin:/bin', 'ENV_FILE': str(env_file), 'DRY_RUN': '1'},
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                    self.assertIn('SPARSE_JOINT_ENABLE=1', result.stdout)
+                    self.assertIn(f'SPARSE_JOINT_PLACEMENT={placement}', result.stdout)
+                    self.assertIn(f'SPARSE_JOINT_EPIPE_FEEDBACK={feedback}', result.stdout)
+                    self.assertIn('SPARSE_JOINT_COST_PROFILE=/offline/costs.json', result.stdout)
+                    self.assertIn('SPARSE_PLAIN_EP_EXEC_MODE=sorted_segment', result.stdout)
+                    joint_config = json.loads(next((tmp_path / 'results').rglob(f'{method}/case_config.json')).read_text())
+                    self.assertEqual(joint_config['cache_by_rank'], config['cache_by_rank'])
+                    self.assertEqual(joint_config['joint_scheduler_enabled'], 1)
 
 
 if __name__ == "__main__":

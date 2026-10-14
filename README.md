@@ -6,6 +6,13 @@ combines co-activation-aware expert placement (SCP), next-layer expert
 prediction and prefetching (RS), and readiness-aware residual scheduling
 (EPIPE) without changing router-selected experts or combine weights.
 
+The independent implementation is preserved by tag `sparse-independent-v1`
+(`175da8d`) and branch `baseline/independent-scheduling`. The
+`research/joint-scheduling` branch adds an experimental shared planner for
+placement, prefetch admission and EPIPE residual handling. See
+[joint scheduling](docs/JOINT_SCHEDULING.md) for its cost model, matched controls
+and CPU validation status; GPU performance validation is pending.
+
 The release is intentionally whitelist-based. It includes the code paths used
 by the paper, deterministic launchers, offline-file preparation scripts, compact source
 tables, and fixed-canvas plotting code. It does not include model weights,

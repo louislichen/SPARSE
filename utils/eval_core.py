@@ -2330,6 +2330,7 @@ class Metrics:
 
 # ---------------- routing cache + stats ----------------
 class SparseContext:
+    joint_runtime: Any = None
     num_layers: int = 0
     num_experts: int = 0
     routing_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]] = {}
@@ -2427,6 +2428,7 @@ class SparseContext:
 
     @classmethod
     def initialize(cls, num_layers: int, rs_group: int = 3, num_experts: int = 0) -> None:
+        cls.joint_runtime = None
         cls.num_layers = int(num_layers)
         cls.num_experts = int(num_experts)
         cls.rs_group = int(rs_group)
@@ -3066,6 +3068,8 @@ class SparseContext:
         cls.logical_ngd_ep_reuse_once = False
         cls.current_phase = "none"
         cls.current_moe_layer_idx = None
+        if cls.joint_runtime is not None:
+            cls.joint_runtime.reset()
         for _, blk in list(cls.layer_blocks.items()):
             reset_fn = getattr(blk, "reset_runtime_state_for_new_request", None)
             if callable(reset_fn):
@@ -3080,6 +3084,8 @@ class SparseContext:
 
     @classmethod
     def reset(cls) -> None:
+        if cls.joint_runtime is not None:
+            cls.joint_runtime.reset()
         cls.routing_cache.clear()
         cls.clear_request_owners()
         cls.clear_group_plan()
@@ -6680,6 +6686,8 @@ class DistributedSparseMoeBlock(nn.Module):
         st = self._current_stage() if stage is None else str(stage or "").strip().lower()
         if flat_i.numel() == 0:
             return torch.empty_like(flat_i, dtype=torch.long, device=self.device)
+        if st == "decode" and SparseContext.joint_runtime is not None:
+            return SparseContext.joint_runtime.destinations(self, flat_i)
         use_decode_cache_aware = st == "decode" and bool(getattr(self, "decode_cache_aware_scp", False))
         if self.placement_mode == "scp_ep" and self._stage_uses_scp(st) and not use_decode_cache_aware:
             table = self._scp_dest_rank_table_for_stage(st)
@@ -6848,6 +6856,8 @@ class DistributedSparseMoeBlock(nn.Module):
 
     def _stage_prefetch_eid_set(self, stage: Optional[str] = None) -> set[int]:
         st = self._current_stage() if stage is None else str(stage or "").strip().lower()
+        if st == "decode" and SparseContext.joint_runtime is not None:
+            return set(self._local_eid_set)
         if self.placement_mode == "scp_ep" and self._stage_uses_scp(st):
             if st == "decode" and bool(getattr(self, "decode_cache_aware_scp", False)):
                 out = set(getattr(self, "_scp_ep_decode_receive_eid_set", set()) or getattr(self, "_scp_ep_receive_eid_set", set()))
@@ -10682,6 +10692,8 @@ class DistributedSparseMoeBlock(nn.Module):
                     if ieid in executable:
                         actual_ids.add(ieid)
 
+        if SparseContext.joint_runtime is not None and str(SparseContext.current_phase) == "decode":
+            actual_ids = SparseContext.joint_runtime.actual_requested_ids(self)
         self.metrics.rs_prefetch_eval_events += 1
         self.metrics.rs_prefetch_eval_pred_total += len(pred_ids)
         self.metrics.rs_prefetch_eval_actual_total += len(actual_ids)
@@ -10874,6 +10886,7 @@ class DistributedSparseMoeBlock(nn.Module):
             return
 
         should_predict_for_routing = (self.expert_source == "rs" or self.exec_routing_mode == "rs")
+        joint = SparseContext.joint_runtime if str(SparseContext.current_phase) == "decode" else None
         cycle_key = (
             "next_layer_rs",
             str(SparseContext.current_phase),
@@ -10882,14 +10895,14 @@ class DistributedSparseMoeBlock(nn.Module):
             int(target_layer),
         )
         budget = 0
-        if self.planner_mode == "rs_prefetch":
+        if self.planner_mode == "rs_prefetch" and joint is None:
             budget = target_blk._prefetch_target_budget(
                 target_layer,
                 target_layer + 1,
                 count_metrics=True,
                 cycle_key=cycle_key,
             )
-        if budget <= 0 and not should_predict_for_routing:
+        if budget <= 0 and not should_predict_for_routing and joint is None:
             return
 
         rs_input = x.float()
@@ -10904,6 +10917,10 @@ class DistributedSparseMoeBlock(nn.Module):
         pred = self._run_rs_mlp_timed(SparseContext.rs_bank[target_layer], rs_input).to(torch.float32)
         if self.metrics is not None:
             self.metrics.rs_next_layer_pred_calls += 1
+
+        if joint is not None:
+            joint.predict(self, target_blk, pred, int(x.shape[0]))
+            return
 
         # If requested, the next layer can execute using this cached prediction.
         # This is valid only for next-layer checkpoints: L(source) predicts L+1(target).
@@ -12241,9 +12258,23 @@ class DistributedSparseMoeBlock(nn.Module):
                 residual_idx = int(demand_indices[0])
                 residual_kind = "demand"
 
+            joint = SparseContext.joint_runtime
+            if joint is not None and joint.config.epipe_feedback:
+                eligible_demand = demand_indices if self._epipe_rs_demand_stage_gate_open(ready_items) else []
+                eid = joint.residual(self, segments, ready_indices, late_indices, eligible_demand)
+                residual_idx, residual_kind = None, ""
+                for i in late_indices + eligible_demand:
+                    if int(segments[i][0]) == eid:
+                        residual_idx = int(i)
+                        residual_kind = "late" if i in late_indices else "demand"
+                        break
+
             if residual_idx is None:
-                self._record_epipe_counter("epipe_decode_rs_skipped_no_miss_count", 1)
-                self._record_epipe_counter("epipe_fallback_no_miss_trigger", 1)
+                if joint is not None and joint.config.epipe_feedback and (late_indices or eligible_demand):
+                    fallback("")  # joint cost rejection is recorded in joint stats
+                else:
+                    self._record_epipe_counter("epipe_decode_rs_skipped_no_miss_count", 1)
+                    self._record_epipe_counter("epipe_fallback_no_miss_trigger", 1)
                 if control_sampled:
                     control_ms = max(0.0, float(_hclm_cp_now_ns() - int(control_start_ns)) / 1_000_000.0)
                     self._record_epipe_float("sampled_epipe_control_overhead_ms", control_ms)
@@ -16380,6 +16411,8 @@ class DistributedSparseMoeBlock(nn.Module):
 
 
         w, idx, router_logits = self._timed_segment("router", lambda: self._routing_for_execute(x))
+        if int(S) == 1 and str(SparseContext.current_phase) == "decode" and SparseContext.joint_runtime is not None:
+            SparseContext.joint_runtime.prepare_execution(self, idx)
         SparseContext.record_routing_profile(
             layer_idx=int(self.layer_idx),
             source_rank=int(self.comm_rank),
@@ -17637,6 +17670,17 @@ class ModelBundle:
 
 
 def build_model_and_tokenizer(cfg: CoreBuildConfig, env: DistEnv, metrics=None) -> ModelBundle:
+    joint_enabled = _env_flag("SPARSE_JOINT_ENABLE", "0")
+    if joint_enabled:
+        if (cfg.routing_mode != "router" or cfg.expert_source != "router"
+                or cfg.planner_mode != "rs_prefetch" or cfg.expert_offload != "cpu"
+                or cfg.cache_policy != "lru" or cfg.oracle_mode != "none" or cfg.enable_skvs):
+            raise ValueError("joint scheduling requires original router, next-layer RS, CPU offload, LRU and no oracle/SKVS")
+        incompatible = ("SPARSE_RS_TWO_STAGE", "SPARSE_GLOBAL_EXPERT_CACHE", "SPARSE_ERS_ENABLE",
+                        "SPARSE_NODEPATCH_ENABLE", "SPARSE_NODE_GROUPED_DISPATCH", "SPARSE_RANK_GROUPED_DISPATCH",
+                        "SPARSE_LOCAL_OWNER_BATCH", "SPARSE_TRANSITION_PREFETCH", "SPARSE_EP_FUSED_WEIGHT_DISPATCH")
+        if any(_env_flag(name, "0") for name in incompatible):
+            raise ValueError("joint prototype uses ordinary EP dispatch; disable incompatible experimental paths")
     dtype = torch.float16 if cfg.dtype == "float16" else torch.bfloat16
     topology = build_dist_topology(
         env,
@@ -17879,6 +17923,19 @@ def build_model_and_tokenizer(cfg: CoreBuildConfig, env: DistEnv, metrics=None) 
 
         gc.collect()
         torch.cuda.empty_cache()
+
+    if joint_enabled:
+        from utils.joint_runtime import JointRuntime
+        if SparseContext.rs_bank_layout != "next_layer" or SparseContext.rs_bank_task != "router_prob":
+            raise ValueError("joint prototype requires adjacent-layer router-probability RS checkpoints")
+        if any(getattr(blk, "_sparse_local_owner_batch", False) for blk in SparseContext.layer_blocks.values()):
+            raise ValueError("joint prototype cannot use owner-local early-return execution")
+        first_block = next(iter(SparseContext.layer_blocks.values()))
+        SparseContext.joint_runtime = JointRuntime.from_env(SparseContext, first_block.comm_world)
+        SparseContext.joint_runtime.verify(first_block)
+        if env.rank == 0:
+            print(f"[JOINT] enabled=1 cost_profile_calibrated={int(SparseContext.joint_runtime.profile.data['calibrated'])} "
+                  f"profile_sha256={SparseContext.joint_runtime.profile.digest}", flush=True)
 
     model.model.embed_tokens = model.model.embed_tokens.to(env.device, dtype=dtype)
     model.model.norm = model.model.norm.to(env.device, dtype=dtype)

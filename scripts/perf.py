@@ -559,6 +559,8 @@ def _clear_all_runtime_state_for_perf() -> None:
                 demote_hot=demote_hot,
             )
         except Exception:
+            if SparseContext.joint_runtime is not None:
+                raise
             SparseContext.reset()
     else:
         SparseContext.reset()
@@ -2122,6 +2124,14 @@ def reduce_and_build_perf_record(metrics: Metrics, args, env: DistEnv, num_exper
         except Exception:
             continue
 
+    joint_stats_by_rank = []
+    if SparseContext.joint_runtime is not None:
+        local_joint = SparseContext.joint_runtime.summary()
+        if dist.is_initialized():
+            joint_stats_by_rank = [None] * env.world
+            dist.all_gather_object(joint_stats_by_rank, local_joint)
+        else:
+            joint_stats_by_rank = [local_joint]
     sim_config = _sim_config_summary(env.world)
     per_node_breakdown = _build_per_node_breakdown(gathered_rank_breakdown or [], sim_config["sim_node_map"])
     weaknet_pair_event_counts = _merge_counter_dicts(gathered_rank_breakdown or [], "weaknet_inter_node_pair_event_counts")
@@ -2246,6 +2256,8 @@ def reduce_and_build_perf_record(metrics: Metrics, args, env: DistEnv, num_exper
         "clear_expert_cache_each_repeat": int(str(os.environ.get("SPARSE_CLEAR_EXPERT_CACHE_EACH_REPEAT", "0")).strip().lower() in ("1", "true", "yes", "on")),
         "demote_hot_cache_each_repeat": int(str(os.environ.get("SPARSE_DEMOTE_HOT_CACHE_EACH_REPEAT", "0")).strip().lower() in ("1", "true", "yes", "on")),
         "planner_mode": args.planner_mode,
+        "joint_scheduler_enabled": int(SparseContext.joint_runtime is not None),
+        "joint_stats_by_rank": joint_stats_by_rank,
         "runtime_mode": runtime_mode,
         "ep_size": int(ep_size),
         "dp_size": int(dp_size),
@@ -3382,6 +3394,8 @@ def aggregate_repeat_records(records: List[Dict[str, Any]], args) -> Dict[str, A
         and summary["repeat_h2d_demand_mb_slope"] > 0.0
     )
     summary["raw_repeats"] = records
+    if base.get("joint_scheduler_enabled"):
+        summary["joint_stats_by_repeat"] = [r.get("joint_stats_by_rank", []) for r in records]
     return summary
 
 

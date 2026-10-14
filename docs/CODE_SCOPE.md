@@ -13,6 +13,12 @@ a separate local workspace. The shared EP/LRU execution path and SPARSE componen
 ablations remain available. Reference tables and plotting code are SPARSE
 evaluation artifacts, not comparison-system implementations.
 
+The `research/joint-scheduling` branch adds a default-off joint SPARSE policy.
+The original policy is available as `sparse` and preserved by tag
+`sparse-independent-v1`. Its cost model, supported runtime and validation
+limitations are documented in `JOINT_SCHEDULING.md`; this development version
+does not represent new measured paper results.
+
 `utils/eval_core.py` contains the SPARSE serving core used for the reported physical
 experiments. Two compatibility modules remain importable because the frozen
 core resolves their symbols at module load time. They are not reachable through

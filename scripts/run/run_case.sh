@@ -23,6 +23,7 @@ Methods:
   rr
   scp, rs, epipe, scp-rs, rs-epipe, sparse
   executor-no-epipe, executor-with-epipe
+  sparse-joint, joint-fixed-placement, joint-no-epipe-feedback
 
 Workloads:
   b1 = batch 1, prompt 1024, output 32
@@ -81,6 +82,9 @@ SCP_PREFILL=0
 EPIPE_ENABLE=0
 EPIPE_RS_MODE=off
 PLAIN_EXEC=unique_mask
+JOINT_ENABLE=0
+JOINT_PLACEMENT=1
+JOINT_EPIPE_FEEDBACK=1
 
 case "${METHOD}" in
   rr) ;;
@@ -125,6 +129,18 @@ case "${METHOD}" in
     PLANNER_MODE=rs_prefetch
     PLAIN_EXEC=sorted_segment
     ;;
+  sparse-joint|joint-fixed-placement|joint-no-epipe-feedback)
+    PLACEMENT_MODE=scp_ep
+    SCP_PREFILL=1
+    RUN_RS=1
+    PLANNER_MODE=rs_prefetch
+    EPIPE_ENABLE=1
+    EPIPE_RS_MODE=residual_scan
+    PLAIN_EXEC=sorted_segment
+    JOINT_ENABLE=1
+    if [[ "${METHOD}" == "joint-fixed-placement" ]]; then JOINT_PLACEMENT=0; fi
+    if [[ "${METHOD}" == "joint-no-epipe-feedback" ]]; then JOINT_EPIPE_FEEDBACK=0; fi
+    ;;
   executor-with-epipe)
     PLACEMENT_MODE=scp_ep
     SCP_PREFILL=1
@@ -151,6 +167,10 @@ if [[ "${DRY_RUN}" != "1" ]]; then
     echo "[run-case][ERROR] missing RS checkpoint directory: ${RS_DIR:-}" >&2
     exit 2
   fi
+  if [[ "${JOINT_ENABLE}" == "1" && ! -s "${JOINT_COST_PROFILE:-}" ]]; then
+    echo "[run-case][ERROR] missing JOINT_COST_PROFILE" >&2
+    exit 2
+  fi
 fi
 
 GROUP_TAG="$(printf 'group%02d' "${REQUEST_GROUP}")"
@@ -173,7 +193,11 @@ cat >"${OUT_DIR}/case_config.json" <<EOF
   "prefetch_top_m": ${PREFETCH_TOP_M_CURRENT},
   "prediction_top_k": ${PREDICTION_TOP_K_CURRENT},
   "prefetch_top_m_by_rank": "${PREFETCH_TOP_M_RANKS}",
-  "prediction_top_k_by_rank": "${PREDICTION_TOP_K_RANKS}"
+  "prediction_top_k_by_rank": "${PREDICTION_TOP_K_RANKS}",
+  "joint_scheduler_enabled": ${JOINT_ENABLE},
+  "joint_placement": ${JOINT_PLACEMENT},
+  "joint_epipe_feedback": ${JOINT_EPIPE_FEEDBACK},
+  "joint_cost_profile": "${JOINT_COST_PROFILE:-}"
 }
 EOF
 
@@ -256,6 +280,14 @@ ENV_ARGS=(env
   "SPARSE_EPIPE_MIN_FREE_MB=384"
   "SPARSE_PLAIN_EP_EXEC_MODE=${PLAIN_EXEC}"
   "SPARSE_EP_FUSED_WEIGHT_DISPATCH=0"
+  "SPARSE_JOINT_ENABLE=${JOINT_ENABLE}"
+  "SPARSE_JOINT_PLACEMENT=${JOINT_PLACEMENT}"
+  "SPARSE_JOINT_EPIPE_FEEDBACK=${JOINT_EPIPE_FEEDBACK}"
+  "SPARSE_JOINT_COST_PROFILE=${JOINT_COST_PROFILE:-}"
+  "SPARSE_JOINT_ROUTE_PASSES=${JOINT_ROUTE_PASSES:-2}"
+  "SPARSE_JOINT_ROUTE_ITEMS=${JOINT_ROUTE_ITEMS:-16}"
+  "SPARSE_JOINT_PREFETCH_TRIALS=${JOINT_PREFETCH_TRIALS:-32}"
+  "SPARSE_JOINT_MIN_GAIN_MS=${JOINT_MIN_GAIN_MS:-0.01}"
   "SPARSE_RESET_RUNTIME_STATE_EACH_REPEAT=1"
   "SPARSE_CLEAR_EXPERT_CACHE_EACH_REPEAT=1"
   "SPARSE_DEMOTE_HOT_CACHE_EACH_REPEAT=0"
