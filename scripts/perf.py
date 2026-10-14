@@ -44,6 +44,16 @@ from utils.runtime.config import ers_config_from_env
 _TASK_LOCALITY_HELPERS = None
 
 
+def _gather_lightweight_stats(env):
+    local = [block._light_policy.summary() for block in SparseContext.layer_blocks.values()
+             if block._light_policy is not None]
+    if not dist.is_initialized():
+        return [local]
+    values = [None] * env.world
+    dist.all_gather_object(values, local)
+    return values
+
+
 def _load_task_locality_helpers():
     """Load TaskLocal helpers lazily so unrelated RR/RS/EPIPE runs stay isolated."""
     global _TASK_LOCALITY_HELPERS
@@ -2027,6 +2037,7 @@ def reduce_and_build_perf_record(metrics: Metrics, args, env: DistEnv, num_exper
     elif env.rank == 0:
         gathered_task_local_meta = [task_local_local_meta]
 
+    lightweight_stats = _gather_lightweight_stats(env)
     if env.rank != 0:
         return None
 
@@ -2246,6 +2257,7 @@ def reduce_and_build_perf_record(metrics: Metrics, args, env: DistEnv, num_exper
         "clear_expert_cache_each_repeat": int(str(os.environ.get("SPARSE_CLEAR_EXPERT_CACHE_EACH_REPEAT", "0")).strip().lower() in ("1", "true", "yes", "on")),
         "demote_hot_cache_each_repeat": int(str(os.environ.get("SPARSE_DEMOTE_HOT_CACHE_EACH_REPEAT", "0")).strip().lower() in ("1", "true", "yes", "on")),
         "planner_mode": args.planner_mode,
+        "lightweight_stats_by_rank": lightweight_stats,
         "runtime_mode": runtime_mode,
         "ep_size": int(ep_size),
         "dp_size": int(dp_size),
@@ -3382,6 +3394,7 @@ def aggregate_repeat_records(records: List[Dict[str, Any]], args) -> Dict[str, A
         and summary["repeat_h2d_demand_mb_slope"] > 0.0
     )
     summary["raw_repeats"] = records
+    summary["lightweight_stats_by_repeat"] = [r.get("lightweight_stats_by_rank", []) for r in records]
     return summary
 
 

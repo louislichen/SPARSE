@@ -130,6 +130,12 @@ def worker(rank,rendezvous,directory):
         assert core['_light_destinations'](block,torch.tensor([0,1])).tolist()==[0,1]
         block.pending=False
         assert core['_light_destinations'](block,torch.tensor([0,1])).tolist()==[rank,rank]
+        tree=ast.parse((ROOT/'scripts/perf.py').read_text())
+        node=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='_gather_lightweight_stats')
+        namespace=dict(dist=dist,SparseContext=SimpleNamespace(layer_blocks={0:block}))
+        exec(compile(ast.Module(body=[node],type_ignores=[]),'<actual-perf-stats>','exec'),namespace)
+        summaries=namespace[node.name](SimpleNamespace(world=2))
+        assert len(summaries)==2 and all(len(v)==1 for v in summaries)
     finally:dist.destroy_process_group()
 
 

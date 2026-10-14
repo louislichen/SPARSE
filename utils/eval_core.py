@@ -17734,6 +17734,11 @@ def build_model_and_tokenizer(cfg: CoreBuildConfig, env: DistEnv, metrics=None) 
                           or cfg.planner_mode != "rs_prefetch" or cfg.expert_offload != "cpu"
                           or cfg.cache_policy != "lru" or cfg.oracle_mode != "none" or cfg.enable_skvs):
         raise ValueError("local readiness policy requires original router, RS prefetch, CPU offload, LRU and no oracle/SKVS")
+    if light_enabled and any(_env_flag(name, "0") for name in (
+            "SPARSE_RS_TWO_STAGE", "SPARSE_GLOBAL_EXPERT_CACHE", "SPARSE_ERS_ENABLE",
+            "SPARSE_NODEPATCH_ENABLE", "SPARSE_NODE_GROUPED_DISPATCH", "SPARSE_RANK_GROUPED_DISPATCH",
+            "SPARSE_LOCAL_OWNER_BATCH", "SPARSE_EP_FUSED_WEIGHT_DISPATCH")):
+        raise ValueError("local readiness policy currently uses ordinary EP and a layer-local expert cache")
     dtype = torch.float16 if cfg.dtype == "float16" else torch.bfloat16
     topology = build_dist_topology(
         env,
