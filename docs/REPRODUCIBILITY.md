@@ -64,7 +64,9 @@ launching a held-out runtime matrix.
 `profile_rs.sh` records each MoE layer's router input hidden state and the next
 layer's router targets. `train_rs.sh` trains one lightweight predictor per
 adjacent layer pair and writes `train_config.json`, per-layer checkpoints, and
-validation metrics.
+test metrics. The default split keeps all decode steps from a request together
+and uses the same train/validation/test request partition for every layer.
+See [RS_TRAINING.md](RS_TRAINING.md) for a pinned C4 pilot and checkpoint freezing.
 
 ### SCP
 
