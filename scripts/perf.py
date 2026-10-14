@@ -44,6 +44,19 @@ from utils.runtime.config import ers_config_from_env
 _TASK_LOCALITY_HELPERS = None
 
 
+def _gather_joint_stats(env):
+    """Collect planner counters on every rank before rank-zero-only formatting."""
+    runtime = SparseContext.joint_runtime
+    if runtime is None:
+        return []
+    local = runtime.summary()
+    if dist.is_initialized():
+        gathered = [None] * env.world
+        dist.all_gather_object(gathered, local)
+        return gathered
+    return [local]
+
+
 def _load_task_locality_helpers():
     """Load TaskLocal helpers lazily so unrelated RR/RS/EPIPE runs stay isolated."""
     global _TASK_LOCALITY_HELPERS
@@ -2029,6 +2042,7 @@ def reduce_and_build_perf_record(metrics: Metrics, args, env: DistEnv, num_exper
     elif env.rank == 0:
         gathered_task_local_meta = [task_local_local_meta]
 
+    joint_stats_by_rank = _gather_joint_stats(env)
     if env.rank != 0:
         return None
 
@@ -2124,14 +2138,6 @@ def reduce_and_build_perf_record(metrics: Metrics, args, env: DistEnv, num_exper
         except Exception:
             continue
 
-    joint_stats_by_rank = []
-    if SparseContext.joint_runtime is not None:
-        local_joint = SparseContext.joint_runtime.summary()
-        if dist.is_initialized():
-            joint_stats_by_rank = [None] * env.world
-            dist.all_gather_object(joint_stats_by_rank, local_joint)
-        else:
-            joint_stats_by_rank = [local_joint]
     sim_config = _sim_config_summary(env.world)
     per_node_breakdown = _build_per_node_breakdown(gathered_rank_breakdown or [], sim_config["sim_node_map"])
     weaknet_pair_event_counts = _merge_counter_dicts(gathered_rank_breakdown or [], "weaknet_inter_node_pair_event_counts")

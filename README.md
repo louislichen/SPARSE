@@ -72,6 +72,8 @@ for example `PYTHON_BIN="$CONDA_PREFIX/bin/python" bash scripts/validate_release
 
 The tested software stack uses Python 3.10, PyTorch 2.2.0 with CUDA 12.1,
 Transformers 4.44.2, and NumPy 1.26.4.
+The CUDA smoke checks additionally passed with PyTorch 2.4.0/CUDA 12.1 on
+RTX 4090 and PyTorch 2.7.1/CUDA 12.8 on H100.
 
 ```bash
 bash scripts/setup_env.sh sparse-aaai

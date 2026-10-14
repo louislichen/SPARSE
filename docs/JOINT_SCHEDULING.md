@@ -170,6 +170,28 @@ its independent/joint controls. The preserved tag and `main` remain unchanged.
 GPU materialization now checks mandatory resident tensors directly instead of
 rejecting valid models below a fixed one-GB allocation threshold.
 
+The two-rank performance CLI also completed warmup and two repeats, exporting
+each rank's planner counters. Its statistics collective runs before the
+nonzero-rank return; otherwise rank zero waits for peers that have already
+left result formatting. A two-process regression check covers this ordering.
+
+A short pretrained Qwen1.5-MoE-A2.7B check (24 layers, 60 experts, top-4,
+FP16, EP=2, one request per rank, prompt 16 and three cached decode steps)
+also passed for all four controls. Prefill logits matched native Transformers
+exactly. Decode's maximum absolute difference was 0.02344, with relative RMS
+below 0.0027; all next-token argmax values matched. This real-model check used
+explicit `atol=0.03, rtol=0.005` because expert batching changes FP16 GEMM
+rounding. The default tighter smoke tolerance remains unchanged. Relative
+to independent scheduling, joint scheduling's maximum difference was 0.015625.
+
+The prototype was slower in this diagnostic: about 158 ms per decode step for
+independent scheduling and 643 ms for joint scheduling. The joint planner alone
+spent roughly 343–429 ms per step on the host. No joint prefetch was admitted
+in this short check; it exercised route changes and residual choices. These
+are engineering diagnostics with untrained predictors, illustrative costs,
+three steps and one repeat, not paper performance estimates. Reduce planner
+overhead and obtain trained/calibrated inputs before a meaningful speed comparison.
+
 This is a host-side Python prototype with synchronous state exchange. Calibrate
 costs, verify CUDA events/cache lifetimes, measure control and metadata overhead,
 sweep search bounds, and compare total H2D, cache pressure, exposed waits, output

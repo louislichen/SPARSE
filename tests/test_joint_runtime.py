@@ -45,6 +45,14 @@ def core_methods(context):
     return {n.name: namespace[n.name] for n in nodes}
 
 
+def perf_stats_collector(context):
+    tree = ast.parse((ROOT / 'scripts/perf.py').read_text())
+    node = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == '_gather_joint_stats')
+    namespace = dict(dist=dist, SparseContext=context)
+    exec(compile(ast.Module(body=[node], type_ignores=[]), '<actual-perf-stats>', 'exec'), namespace)
+    return namespace['_gather_joint_stats']
+
+
 class TinyBlock:
     def __init__(self, rank, layer, resident, budget):
         self.comm_rank, self.comm_world, self.comm_group = rank, 2, dist.group.WORLD
@@ -151,6 +159,9 @@ def distributed_worker(rank, rendezvous):
                 torch.testing.assert_close(actual, expected)
                 assert torch.equal(original_ids, indices) and torch.equal(original_weights, weights)
         assert runtime.stats['execution_plans'] == 4 and runtime.stats['exchange_calls'] == 5
+        summaries = perf_stats_collector(context)(SimpleNamespace(rank=rank, world=2))
+        assert len(summaries) == 2
+        assert all(s['execution_plans'] == 4 and s['exchange_calls'] == 5 for s in summaries)
         runtime.reset()
         assert not runtime.routes and not runtime.forecasts and runtime.stats['exchange_calls'] == 0
         with unittest.TestCase().assertRaises(RuntimeError): runtime.destinations(source, torch.tensor([0]))
@@ -160,6 +171,18 @@ def distributed_worker(rank, rendezvous):
 
 @unittest.skipIf(torch is None, 'PyTorch required for joint runtime checks')
 class JointRuntimeTests(unittest.TestCase):
+    def test_perf_stats_collective_precedes_nonzero_rank_return(self):
+        tree = ast.parse((ROOT / 'scripts/perf.py').read_text())
+        function = next(n for n in tree.body if isinstance(n, ast.FunctionDef)
+                        and n.name == 'reduce_and_build_perf_record')
+        guard = next(n for n in function.body if isinstance(n, ast.If)
+                     and ast.unparse(n.test) == 'env.rank != 0')
+        collector = next(n for n in function.body if isinstance(n, ast.Assign)
+                         and isinstance(n.value, ast.Call)
+                         and isinstance(n.value.func, ast.Name)
+                         and n.value.func.id == '_gather_joint_stats')
+        self.assertLess(collector.lineno, guard.lineno)
+
     def test_cost_profile_and_activation_calibration(self):
         data = profile_data()
         profile = CostProfile(data, 2)
