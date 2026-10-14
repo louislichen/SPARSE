@@ -6,6 +6,13 @@ combines co-activation-aware expert placement (SCP), next-layer expert
 prediction and prefetching (RS), and readiness-aware residual scheduling
 (EPIPE) without changing router-selected experts or combine weights.
 
+The original implementation remains at tag `sparse-independent-v1`, branch
+`baseline/independent-scheduling` and `main` (`175da8d`). This
+`research/lightweight-coupling` branch starts from that version and adds optional
+local readiness decisions within its existing asynchronous runtime. It does not
+use the synchronous global planner from the separate joint research branches.
+See [lightweight coupling](docs/LIGHTWEIGHT_COUPLING.md) for scope and validation.
+
 The release is intentionally whitelist-based. It includes the code paths used
 by the paper, deterministic launchers, offline-file preparation scripts, compact source
 tables, and fixed-canvas plotting code. It does not include model weights,
