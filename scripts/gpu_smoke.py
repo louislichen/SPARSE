@@ -90,6 +90,14 @@ def prepare(args):
 
 
 def configure(directory, method):
+    methods = {"independent", "joint", "joint-fixed-placement", "joint-no-epipe-feedback",
+               "joint-reference", "joint-incremental", "joint-candidates", "joint-cache",
+               "joint-combined", "joint-fast"}
+    if method not in methods:
+        raise ValueError(f"unknown method {method}")
+    cached = method in ("joint-cache", "joint-combined", "joint-fast")
+    combined = method in ("joint-combined", "joint-fast")
+    fast = method == "joint-fast"
     settings = dict(
         SPARSE_SCP_APPLY_PREFILL="1", SPARSE_SCP_APPLY_DECODE="0",
         SPARSE_SCP_TRANSIENT_PREFILL_CACHE="1", SPARSE_PLAIN_EP_EXEC_MODE="sorted_segment",
@@ -109,6 +117,14 @@ def configure(directory, method):
         SPARSE_JOINT_ENABLE=str(int(method != "independent")),
         SPARSE_JOINT_PLACEMENT=str(int(method != "joint-fixed-placement")),
         SPARSE_JOINT_EPIPE_FEEDBACK=str(int(method != "joint-no-epipe-feedback")),
+        SPARSE_JOINT_EVALUATOR="reference" if method == "joint-reference" else "incremental",
+        SPARSE_JOINT_CACHE_STATIC=str(int(cached)),
+        SPARSE_JOINT_COMBINE_EXCHANGE=str(int(combined)),
+        SPARSE_JOINT_PREDICTION_CANDIDATES_ONLY=str(int(method in ("joint-candidates", "joint-fast"))),
+        SPARSE_JOINT_ROUTE_PASSES="1" if fast else "2",
+        SPARSE_JOINT_ROUTE_ITEMS="8" if fast else "16",
+        SPARSE_JOINT_PREFETCH_TRIALS="8" if fast else "32",
+        SPARSE_JOINT_MAX_EVALUATIONS="24" if fast else "0",
         SPARSE_HF_ATTN_IMPLEMENTATION="eager",
     )
     os.environ.update(settings)
@@ -179,8 +195,6 @@ def run(args):
             gc.collect(); torch.cuda.empty_cache()
         records, independent_logits = [], None
         for method in args.methods.split(","):
-            if method not in ("independent", "joint", "joint-fixed-placement", "joint-no-epipe-feedback"):
-                raise ValueError(f"unknown method {method}")
             configure(directory, method)
             metrics = Metrics()
             torch.cuda.reset_peak_memory_stats(env.device)

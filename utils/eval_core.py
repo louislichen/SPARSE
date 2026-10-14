@@ -3086,6 +3086,7 @@ class SparseContext:
         cls.logical_ngd_ep_reuse_once = False
         cls.current_phase = "none"
         cls.current_moe_layer_idx = None
+        cls.prefill_scp_transient_demoted_for_decode = False
         if cls.joint_runtime is not None:
             cls.joint_runtime.reset()
         for _, blk in list(cls.layer_blocks.items()):

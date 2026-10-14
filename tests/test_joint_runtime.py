@@ -88,7 +88,7 @@ class TinyBlock:
     def _get_local_fused(self, eid): return torch.cat(self.weights[eid][:2]), self.weights[eid][2]
 
 
-def distributed_worker(rank, rendezvous):
+def distributed_worker(rank, rendezvous, combined=False):
     dist.init_process_group('gloo', init_method=rendezvous, rank=rank, world_size=2,
                             timeout=timedelta(seconds=30))
     try:
@@ -99,14 +99,15 @@ def distributed_worker(rank, rendezvous):
                                   rs_bank_layout='next_layer', rs_bank_task='router_prob',
                                   rs_bank_source_layers=[-1, 0],
                                   rs_bank=[None, lambda x: torch.softmax(x[:, :2], dim=-1)])
-        runtime = JointRuntime(context, CostProfile(profile_data(), 2), PlannerConfig())
+        runtime = JointRuntime(context, CostProfile(profile_data(), 2), PlannerConfig(),
+                               cache_static=combined, combine_exchange=combined)
         context.joint_runtime = runtime
         runtime.verify(source)
         methods = core_methods(context)
         # Call the actual early-RS hook with unequal budgets and one empty rank.
         features = torch.tensor([[2., -1., .5]]) if rank == 0 else torch.empty((0, 3))
         methods['_compute_and_schedule_next_layer_rs'](source, features, 1)
-        assert runtime.stats['prediction_plans'] == 1
+        assert runtime.stats['prediction_plans'] == (0 if combined else 1)
         assert source.metrics.rs_next_layer_pred_calls == 1
         assert len(target.admitted) <= target.budget
         for kind in ('modulelist', 'fused'):
@@ -117,6 +118,7 @@ def distributed_worker(rank, rendezvous):
                 hidden = torch.tensor([[1., 2., 3.]]) + rank if indices.numel() else torch.empty((0, 3))
                 original_ids, original_weights = indices.clone(), weights.clone()
                 runtime.prepare_execution(source, indices)
+                assert runtime.stats['prediction_plans'] == 1
                 destinations = methods['_resolve_dest_for_flat_experts'](source, indices.reshape(-1))
                 routes = [None, None]
                 dist.all_gather_object(routes, runtime.routes[0][1].tolist())
@@ -158,19 +160,42 @@ def distributed_worker(rank, rendezvous):
                         expected[token] += y * weights[token, slot]
                 torch.testing.assert_close(actual, expected)
                 assert torch.equal(original_ids, indices) and torch.equal(original_weights, weights)
-        assert runtime.stats['execution_plans'] == 4 and runtime.stats['exchange_calls'] == 5
+        exchanges = 4 if combined else 5
+        assert runtime.stats['execution_plans'] == 4 and runtime.stats['exchange_calls'] == exchanges
+        assert runtime.stats['exchange_payloads'] == 5
         summaries = perf_stats_collector(context)(SimpleNamespace(rank=rank, world=2))
         assert len(summaries) == 2
-        assert all(s['execution_plans'] == 4 and s['exchange_calls'] == 5 for s in summaries)
+        assert all(s['execution_plans'] == 4 and s['exchange_calls'] == exchanges for s in summaries)
         runtime.reset()
         assert not runtime.routes and not runtime.forecasts and runtime.stats['exchange_calls'] == 0
         with unittest.TestCase().assertRaises(RuntimeError): runtime.destinations(source, torch.tensor([0]))
+        if combined:
+            scores = torch.full((1, 2), float('nan')) if rank == 0 else torch.tensor([[.5, .5]])
+            runtime.predict(source, target, scores, 1)
+            # A single bad source is rejected on both ranks after the common
+            # metadata collective, before either rank dispatches experts.
+            with unittest.TestCase().assertRaises(ValueError):
+                runtime.prepare_execution(source, torch.tensor([[0, 1]]))
     finally:
         dist.destroy_process_group()
 
 
 @unittest.skipIf(torch is None, 'PyTorch required for joint runtime checks')
 class JointRuntimeTests(unittest.TestCase):
+    def test_new_request_resets_prefill_demotion_guard(self):
+        tree = ast.parse((ROOT / 'utils/eval_core.py').read_text())
+        cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == 'SparseContext')
+        node = copy.deepcopy(next(n for n in cls.body if isinstance(n, ast.FunctionDef)
+                                  and n.name == 'reset_runtime_state_for_new_request'))
+        node.decorator_list = []
+        namespace = {}
+        exec(compile(ast.Module(body=[node], type_ignores=[]), '<request-reset>', 'exec'), namespace)
+        context = SimpleNamespace(routing_cache={}, clear_request_owners=lambda: None,
+                                  clear_group_plan=lambda: None, clear_local_batch=lambda: None,
+                                  joint_runtime=None, layer_blocks={}, prefill_scp_transient_demoted_for_decode=True)
+        namespace[node.name](context, clear_expert_cache=True)
+        self.assertFalse(context.prefill_scp_transient_demoted_for_decode)
+
     def test_perf_stats_collective_precedes_nonzero_rank_return(self):
         tree = ast.parse((ROOT / 'scripts/perf.py').read_text())
         function = next(n for n in tree.body if isinstance(n, ast.FunctionDef)
@@ -207,6 +232,16 @@ class JointRuntimeTests(unittest.TestCase):
                 if time.monotonic() > deadline:
                     for process in ctx.processes: process.terminate()
                     self.fail('joint collective/numerical test exceeded 45 seconds')
+
+    def test_combined_exchange_empty_source_zero_budget_and_bad_scores(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rendezvous = (Path(tmp) / 'gloo').as_uri()
+            ctx = mp.spawn(distributed_worker, args=(rendezvous, True), nprocs=2, join=False)
+            deadline = time.monotonic() + 45
+            while not ctx.join(timeout=1):
+                if time.monotonic() > deadline:
+                    for process in ctx.processes: process.terminate()
+                    self.fail('combined joint collective exceeded 45 seconds')
 
 
 if __name__ == '__main__':

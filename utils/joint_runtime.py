@@ -5,7 +5,7 @@ one per actual decode-layer boundary. Resolvers and EPIPE never communicate.
 """
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import hashlib
 import json
 import math
@@ -31,7 +31,8 @@ class CostProfile:
     REQUIRED = ("h2d_bytes_per_ms", "h2d_latency_ms", "expert_ms", "item_ms",
                 "next_attention_ms", "split_overhead_ms")
 
-    def __init__(self, data, world, raw=None):
+    def __init__(self, data, world, raw=None, *, cache_static=False):
+        self.cache_static, self._rank_costs = cache_static, {}
         if data.get("schema_version") != 1 or data.get("world_size") != world:
             raise ValueError("joint cost profile schema/world_size mismatch")
         if not isinstance(data.get("calibrated"), bool):
@@ -54,12 +55,15 @@ class CostProfile:
             self.validate_knots(knots)
 
     @classmethod
-    def load(cls, path, world):
+    def load(cls, path, world, *, cache_static=False):
         path = Path(path).expanduser()
         raw = path.read_bytes()
-        return cls(json.loads(raw), world, raw)
+        return cls(json.loads(raw), world, raw, cache_static=cache_static)
 
     def rank_cost(self, rank, layer):
+        key = (rank, layer)
+        if self.cache_static and key in self._rank_costs:
+            return self._rank_costs[key]
         cost = dict(self.data["rank_defaults"])
         cost.update(self.data.get("rank_overrides", {}).get(str(rank), {}))
         layer_cost = self.data.get("layers", {}).get(str(layer), {})
@@ -69,6 +73,8 @@ class CostProfile:
             nonnegative(cost[name], name)
         if cost["h2d_bytes_per_ms"] <= 0:
             raise ValueError("H2D bandwidth must be positive")
+        if self.cache_static:
+            self._rank_costs[key] = cost
         return cost
 
     @staticmethod
@@ -83,10 +89,10 @@ class CostProfile:
         if knots[0][0] != 0 or knots[-1][0] != 1:
             raise ValueError("activation calibration must cover [0, 1]")
 
-    def activation_probability(self, scores, top_k, layer):
+    def activation_probability(self, scores, top_k, layer, *, validate=True):
         # A uniform-multihot CE target gives q ~= P(expert selected)/router_k.
         # Clipped k*q is a proxy; optional held-out empirical knots calibrate it.
-        if scores.ndim != 2 or not torch.isfinite(scores).all() or bool((scores < 0).any()) or bool((scores > 1).any()):
+        if validate and (scores.ndim != 2 or not torch.isfinite(scores).all() or bool((scores < 0).any()) or bool((scores > 1).any())):
             raise ValueError("joint prediction must be a finite token/expert probability matrix")
         p = (scores * int(top_k)).clamp(0, 1)
         knots = self.data.get("activation_calibration", {}).get(str(layer))
@@ -103,9 +109,13 @@ class JointRuntime:
     # Per-expert columns; final row stores cache capacity/headroom and copy queue.
     WIDTH = 10
 
-    def __init__(self, context, profile: CostProfile, config: PlannerConfig):
+    def __init__(self, context, profile: CostProfile, config: PlannerConfig, *, cache_static=False, combine_exchange=False):
         self.context, self.profile, self.config = context, profile, config
         self.planner = JointPlanner(config)
+        self.cache_static, self._expert_bytes = cache_static, {}
+        self.combine_exchange, self._exchange_buffers = combine_exchange, {}
+        self.staged_predictions = {}
+        self.capture = None
         self.routes: Dict[int, tuple] = {}
         self.forecasts: Dict[int, object] = {}
         self.actual_demands: Dict[int, tuple] = {}
@@ -116,7 +126,8 @@ class JointRuntime:
         path = os.environ.get("SPARSE_JOINT_COST_PROFILE", "").strip()
         if not path:
             raise ValueError("joint scheduler requires SPARSE_JOINT_COST_PROFILE")
-        profile = CostProfile.load(path, world)
+        cache_static = flag("SPARSE_JOINT_CACHE_STATIC", "0")
+        profile = CostProfile.load(path, world, cache_static=cache_static)
         config = PlannerConfig(
             placement=flag("SPARSE_JOINT_PLACEMENT"),
             epipe_feedback=flag("SPARSE_JOINT_EPIPE_FEEDBACK"),
@@ -126,13 +137,18 @@ class JointRuntime:
             eviction_risk_weight=float(profile.data.get("eviction_risk_weight", 0.0)),
             route_items=int(os.environ.get("SPARSE_JOINT_ROUTE_ITEMS", "16")),
             prefetch_trials=int(os.environ.get("SPARSE_JOINT_PREFETCH_TRIALS", "32")),
+            evaluator=os.environ.get("SPARSE_JOINT_EVALUATOR", "incremental"),
+            prediction_candidates_only=flag("SPARSE_JOINT_PREDICTION_CANDIDATES_ONLY", "0"),
+            max_evaluations=int(os.environ.get("SPARSE_JOINT_MAX_EVALUATIONS", "0")),
         )
-        return cls(context, profile, config)
+        return cls(context, profile, config, cache_static=cache_static,
+                   combine_exchange=flag("SPARSE_JOINT_COMBINE_EXCHANGE", "0"))
 
     def reset(self):
         self.routes.clear()
         self.forecasts.clear()
         self.actual_demands.clear()
+        self.staged_predictions.clear()
         self.stats = dict(prediction_plans=0, execution_plans=0, exchange_calls=0,
                           exchange_bytes=0, exchange_host_ms=0.0, planning_host_ms=0.0,
                           prediction_control_host_ms=0.0, execution_control_host_ms=0.0,
@@ -140,6 +156,8 @@ class JointRuntime:
                           planned_prefetches=0, planned_prefetch_bytes=0,
                           modeled_gain_ms=0.0, route_item_changes=0,
                           epipe_selected=0, epipe_rejected=0, cost_evaluations=0)
+        self.stats.update(full_cost_evaluations=0, incremental_cost_evaluations=0)
+        self.stats.update(exchange_payloads=0, combined_boundaries=0)
 
     def _step(self):
         return int(self.context.runtime_call_id)
@@ -151,7 +169,15 @@ class JointRuntime:
         protected = block._prefetch_protect_ids()
         for eid in range(block.num_experts):
             available = eid in block._local_eid_set
-            nbytes = int(block._epipe_estimate_expert_nbytes(eid)) if available else 0
+            key = (id(block), eid)
+            if not available:
+                nbytes = 0
+            elif self.cache_static and key in self._expert_bytes:
+                nbytes = self._expert_bytes[key]
+            else:
+                nbytes = int(block._epipe_estimate_expert_nbytes(eid))
+                if self.cache_static:
+                    self._expert_bytes[key] = nbytes
             resident = eid in resident_ids
             ready = resident and block._local_prefetch_ready(eid)
             pending = 0.0 if ready or not resident else cost["h2d_latency_ms"] + nbytes / cost["h2d_bytes_per_ms"]
@@ -179,22 +205,37 @@ class JointRuntime:
                          int(float(os.environ.get("SPARSE_PREFETCH_MIN_FREE_MB", "32")) * 1024**2),
                          cost["split_overhead_ms"], budget)
 
-    def _exchange(self, block, counts, probabilities, state, candidates=None):
-        n = block.num_experts
+    def _exchange(self, block, counts, probabilities, state, candidates=None, validity=None):
+        return self._exchange_many([(block, counts, probabilities, state, candidates, validity)])[0]
+
+    def _exchange_many(self, items):
+        block = items[0][0]
+        n = max(item[0].num_experts for item in items)
+        shape = (len(items), n + 1, self.WIDTH)
+        key = (block.comm_world, str(block.device), shape)
         # Counts, P(any use), weight bytes, availability, residency, readiness,
         # remaining-time proxy, protection and retention risk are fixed-width.
-        data = torch.zeros((n + 1, self.WIDTH), dtype=torch.float64, device=block.device)
-        data[:n, 0] = counts
-        data[:n, 1] = probabilities
-        if candidates is not None:
-            data[:n, 9] = candidates
-        rows = [[e.nbytes, e.available, e.resident, e.ready, e.pending_ms, e.protected, e.reuse_risk]
-                for e in state.experts]
-        data[:n, 2:9] = torch.tensor(rows, dtype=torch.float64, device=block.device)
-        data[n, :7] = torch.tensor([state.capacity, state.free_bytes, state.queue_ms,
-                                   state.window_ms, state.prefetch_budget, state.staging_margin_bytes,
-                                   state.prefetch_margin_bytes], dtype=torch.float64, device=block.device)
-        gathered = [torch.empty_like(data) for _ in range(block.comm_world)]
+        if self.cache_static and key in self._exchange_buffers:
+            data, gathered = self._exchange_buffers[key]
+            data.zero_()
+        else:
+            data = torch.zeros(shape, dtype=torch.float64, device=block.device)
+            gathered = [torch.empty_like(data) for _ in range(block.comm_world)]
+            if self.cache_static:
+                self._exchange_buffers[key] = (data, gathered)
+        for i, (target, counts, probabilities, state, candidates, validity) in enumerate(items):
+            size = target.num_experts
+            data[i, :size, 0] = counts
+            data[i, :size, 1] = probabilities
+            if candidates is not None:
+                data[i, :size, 9] = candidates
+            rows = [[e.nbytes, e.available, e.resident, e.ready, e.pending_ms, e.protected, e.reuse_risk]
+                    for e in state.experts]
+            data[i, :size, 2:9] = torch.tensor(rows, dtype=torch.float64, device=block.device)
+            data[i, size, :7] = torch.tensor([state.capacity, state.free_bytes, state.queue_ms,
+                                            state.window_ms, state.prefetch_budget, state.staging_margin_bytes,
+                                            state.prefetch_margin_bytes], dtype=torch.float64, device=block.device)
+            data[i, size, 8] = 1. if validity is None else validity
         start = time.perf_counter()
         if dist.is_initialized():
             dist.all_gather(gathered, data, group=block.comm_group)
@@ -205,11 +246,18 @@ class JointRuntime:
         # Host planning is explicit and measured, including device-to-host copy.
         values = torch.stack(gathered).cpu().tolist()
         self.stats["exchange_calls"] += 1
+        self.stats["exchange_payloads"] += len(items)
         self.stats["exchange_bytes"] += data.numel() * data.element_size() * max(0, block.comm_world - 1)
         self.stats["exchange_host_ms"] += (time.perf_counter() - start) * 1000
+        return [self._unpack(item[0], [rank[i] for rank in values]) for i, item in enumerate(items)]
+
+    def _unpack(self, block, values):
+        n = block.num_experts
         ranks, count_rows, probability_rows = [], [], []
         for rank, value in enumerate(values):
             row = value[n]
+            if row[8] != 1.:
+                raise ValueError("joint predictor must contain finite probabilities in [0, 1]")
             cost = self.profile.rank_cost(rank, block.layer_idx)
             states = tuple(ExpertState(int(e[2]), bool(e[3]), bool(e[4]), bool(e[5]),
                                        float(e[6]), bool(e[7]), float(e[8])) for e in value[:n])
@@ -223,6 +271,12 @@ class JointRuntime:
         return Demand(tuple(count_rows), tuple(probability_rows), eligible), tuple(ranks)
 
     def _plan(self, block, demand, ranks, prefetch):
+        if self.capture is not None:
+            self.capture.append(dict(demand=demand, ranks=ranks, owners=tuple(block.rr_expert_to_rank_cpu),
+                                     link_latency=self.profile.latency, link_bandwidth=self.profile.bandwidth,
+                                     dispatch_item_bytes=block.hidden_size * torch.empty((), dtype=block.dtype).element_size() + 8 + torch.empty((), dtype=block.dtype).element_size(),
+                                     combine_item_bytes=block.hidden_size * torch.empty((), dtype=block.dtype).element_size(),
+                                     prefetch=prefetch, config=asdict(self.config)))
         start = time.perf_counter()
         # Exact wire item sizes for ordinary EP: hidden + expert id + weight;
         # return sends hidden states. Original router weights are untouched.
@@ -233,6 +287,8 @@ class JointRuntime:
                                  hidden_bytes, prefetch=prefetch)
         self.stats["planning_host_ms"] += (time.perf_counter() - start) * 1000
         self.stats["cost_evaluations"] += plan.evaluations
+        self.stats["full_cost_evaluations"] += plan.full_evaluations
+        self.stats["incremental_cost_evaluations"] += plan.incremental_evaluations
         return plan
 
     def predict(self, source, target, scores, batch_tokens):
@@ -241,8 +297,15 @@ class JointRuntime:
             raise ValueError("joint predictor shape does not match target experts/source tokens")
         target._begin_group_prefetch_cycle(target.layer_idx, target.layer_idx + 1,
             cycle_key=("joint", self._step(), source.layer_idx, target.layer_idx))
-        probability = self.profile.activation_probability(scores.detach().float(), target.top_k, target.layer_idx)
-        if not torch.isfinite(probability).all():
+        scores = scores.detach().float()
+        validity = None
+        if self.cache_static:
+            # Transmit the validity marker with metadata so all ranks reject
+            # bad scores together, without three scalar CUDA->CPU checks.
+            validity = torch.isfinite(scores).all() & (scores >= 0).all() & (scores <= 1).all()
+        probability = self.profile.activation_probability(scores, target.top_k, target.layer_idx,
+                                                          validate=not self.cache_static)
+        if not self.cache_static and not torch.isfinite(probability).all():
             raise ValueError("nonfinite joint predictor probabilities")
         counts = probability.sum(dim=0)
         union = counts.clamp(0, 1)
@@ -255,8 +318,19 @@ class JointRuntime:
         window = cost["expert_ms"] * source.top_k + cost["item_ms"] * batch_tokens * source.top_k
         window += self.profile.rank_cost(target.comm_rank, target.layer_idx)["next_attention_ms"]
         budget = target._effective_rs_prefetch_top_m()
+        if self.combine_exchange:
+            if source.layer_idx in self.staged_predictions:
+                raise RuntimeError("duplicate joint prediction at one layer boundary")
+            self.staged_predictions[source.layer_idx] = (self._step(), target, counts, union, candidates,
+                                                         validity, window, budget)
+            self.stats["prediction_control_host_ms"] += (time.perf_counter() - control_start) * 1000
+            return
         state = self._snapshot(target, window, budget)
-        demand, ranks = self._exchange(target, counts, union, state, candidates)
+        demand, ranks = self._exchange(target, counts, union, state, candidates, validity)
+        self._finish_prediction(target, demand, ranks, state)
+        self.stats["prediction_control_host_ms"] += (time.perf_counter() - control_start) * 1000
+
+    def _finish_prediction(self, target, demand, ranks, state):
         plan = self._plan(target, demand, ranks, prefetch=True)
         self.forecasts[target.layer_idx] = (self._step(), plan)
         self.stats["prediction_plans"] += 1
@@ -265,10 +339,14 @@ class JointRuntime:
         self.stats["planned_prefetches"] += len(local)
         self.stats["planned_prefetch_bytes"] += sum(state.experts[a.expert].nbytes for a in local)
         target._admit_prefetch_plan([(a.expert, a.victim) for a in local], group_end=target.layer_idx + 1)
-        self.stats["prediction_control_host_ms"] += (time.perf_counter() - control_start) * 1000
+        return plan
 
     def verify(self, block):
-        signature = (self.profile.digest, asdict(self.config), self.context.rs_bank_layout,
+        features = tuple(getattr(module, "rs_feature_mode", "hidden") for module in self.context.rs_bank)
+        if self.combine_exchange and any(mode != "hidden" for mode in features):
+            raise ValueError("combined exchange currently requires hidden-only adjacent RS features")
+        signature = (self.profile.digest, asdict(self.config), self.cache_static, self.combine_exchange, features,
+                     self.context.rs_bank_layout,
                      tuple(self.context.rs_bank_source_layers),
                      tuple(sorted(self.context.layer_blocks)), block.num_experts)
         signatures = [None] * block.comm_world
@@ -290,7 +368,33 @@ class JointRuntime:
         control_start = time.perf_counter()
         counts = torch.bincount(indices.reshape(-1).long(), minlength=block.num_experts).double()
         state = self._snapshot(block)
-        demand, ranks = self._exchange(block, counts, (counts > 0).double(), state)
+        staged = self.staged_predictions.pop(block.layer_idx, None)
+        prediction_ms = 0.
+        if staged is None:
+            demand, ranks = self._exchange(block, counts, (counts > 0).double(), state)
+        else:
+            step, target, forecast_counts, probabilities, candidates, validity, window, budget = staged
+            if step != self._step():
+                raise RuntimeError("stale staged joint prediction")
+            target_state = self._snapshot(target, window, budget)
+            actual, forecast = self._exchange_many([
+                (block, counts, (counts > 0).double(), state, None, None),
+                (target, forecast_counts, probabilities, target_state, candidates, validity)])
+            demand, ranks = actual
+            prediction_start = time.perf_counter()
+            predicted = self._finish_prediction(target, forecast[0], forecast[1], target_state)
+            # The actual snapshot preceded new target-layer prefetches. Account
+            # for their copy queue and bytes conservatively before dispatch.
+            added_bytes, added_ms = [0] * block.comm_world, [0.] * block.comm_world
+            for action in predicted.admissions:
+                expert = forecast[1][action.rank].experts[action.expert]
+                added_bytes[action.rank] += expert.nbytes
+                added_ms[action.rank] += forecast[1][action.rank].transfer_ms(action.expert)
+            ranks = tuple(replace(rank, free_bytes=max(0, rank.free_bytes - added_bytes[r]),
+                                  queue_ms=rank.queue_ms + added_ms[r]) for r, rank in enumerate(ranks))
+            prediction_ms = (time.perf_counter() - prediction_start) * 1000
+            self.stats["prediction_control_host_ms"] += prediction_ms
+            self.stats["combined_boundaries"] += 1
         plan = self._plan(block, demand, ranks, prefetch=False)
         table = torch.tensor(plan.routes, dtype=torch.long, device=block.device)
         self.routes[block.layer_idx] = (self._step(), table)
@@ -301,7 +405,7 @@ class JointRuntime:
         row = table[block.comm_rank]
         owners = torch.tensor(block.rr_expert_to_rank_cpu, device=block.device)
         self.stats["route_item_changes"] += int(counts[row != owners].sum().item())
-        self.stats["execution_control_host_ms"] += (time.perf_counter() - control_start) * 1000
+        self.stats["execution_control_host_ms"] += (time.perf_counter() - control_start) * 1000 - prediction_ms
 
     def actual_requested_ids(self, block):
         step, ids = self.actual_demands.get(block.layer_idx, (-1, set()))
@@ -328,6 +432,7 @@ class JointRuntime:
 
     def summary(self):
         return {**self.stats, "profile_sha256": self.profile.digest,
+                "cache_static": self.cache_static, "combine_exchange": self.combine_exchange,
                 "cost_profile_calibrated": self.profile.data["calibrated"],
                 "activation_probability_mode": "empirical_knots" if self.profile.data.get("activation_calibration") else "k_times_softmax_proxy",
                 "planner_config": asdict(self.config), "model_semantics": "probability-weighted layer latency proxy"}
