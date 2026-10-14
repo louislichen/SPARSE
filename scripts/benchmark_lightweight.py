@@ -24,8 +24,9 @@ from utils.lightweight_policy import CostProfile
 
 
 @torch.inference_mode()
-def sequence(model, tokens, prompt_len, cold_decode=False):
+def sequence(model, tokens, prompt_len, cold_decode=False, metrics=None):
     past, logits, elapsed = None, [], []
+    decode_start = {}
     for step in range(tokens.shape[1] - prompt_len + 1):
         length = prompt_len + step
         SparseContext.current_phase = 'prefill' if step == 0 else 'decode'
@@ -42,8 +43,15 @@ def sequence(model, tokens, prompt_len, cold_decode=False):
         if step == 0:
             DistributedSparseMoeBlock.demote_prefill_scp_transients_for_decode()
             if cold_decode: DistributedSparseMoeBlock.clear_all_expert_caches()
+            if metrics is not None:
+                decode_start = {key:value for key,value in vars(metrics).items()
+                                if isinstance(value, (int, float))}
     SparseContext.finalize_prefetch_all()
-    return torch.stack(logits), elapsed
+    result = (torch.stack(logits), elapsed)
+    if metrics is not None:
+        return (*result, {key:value-decode_start.get(key, 0) for key,value in vars(metrics).items()
+                         if isinstance(value, (int, float))})
+    return result
 
 
 def configure(directory):
@@ -75,11 +83,13 @@ def main():
     parser.add_argument('--steps', type=int, default=3)
     parser.add_argument('--expert-cache', type=int, default=8)
     parser.add_argument('--repeat', type=int, default=5)
+    parser.add_argument('--num-requests', type=int, default=1)
+    parser.add_argument('--rs-dir', type=Path)
     parser.add_argument('--atol', type=float, default=.03)
     parser.add_argument('--rtol', type=float, default=.005)
     parser.add_argument('--cold-decode', action='store_true')
     args = parser.parse_args()
-    if min(args.batch, args.prompt_len, args.steps, args.repeat) < 1: parser.error('invalid dimensions')
+    if min(args.batch, args.prompt_len, args.steps, args.repeat, args.num_requests) < 1: parser.error('invalid dimensions')
     methods = args.methods.split(',')
     flags = {'independent':None, 'prefetch':(True,False,False), 'ready-route':(False,True,False),
              'no-feedback':(True,True,False), 'coupled':(True,True,True)}
@@ -96,11 +106,24 @@ def main():
                          config_sha256=hashlib.sha256((model_path/'config.json').read_bytes()).hexdigest(),
                          weights=[(p.name,p.stat().st_size,p.stat().st_mtime_ns) for p in sorted(model_path.glob('*.safetensors'))])
         if cached['signature'] != signature: raise ValueError('native reference signature mismatch')
-        tokens, expected = cached['tokens'].to(env.device), cached['logits']
+        requests = cached.get('requests', [dict(tokens=cached.get('tokens'), logits=cached.get('logits'),
+                                               request_id='legacy-functional-fixture')])
+        if len(requests) != args.num_requests: raise ValueError('native reference request count mismatch')
+        if 'dataset_path' in fixture:
+            dataset_sha = hashlib.sha256(Path(fixture['dataset_path']).read_bytes()).hexdigest()
+            if dataset_sha != fixture['dataset_sha256']: raise ValueError('request dataset changed')
+        for request in requests:
+            if tuple(request['tokens'].shape) != (args.batch, args.prompt_len + args.steps):
+                raise ValueError('native reference input dimensions differ')
+        rs_path = (args.rs_dir or directory/'rs').resolve()
+        rs_hashes = {p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(rs_path.glob('*.pth'))}
+        bank_manifest = json.loads((rs_path/'bank_manifest.json').read_text()) if (rs_path/'bank_manifest.json').exists() else None
+        if bank_manifest is not None and rs_hashes != bank_manifest['checkpoint_sha256']:
+            raise ValueError('frozen RS weights changed')
         configure(directory)
         metrics = Metrics()
         bundle = build_model_and_tokenizer(CoreBuildConfig(model_path=fixture['model_path'],
-            scp_path=str(directory/'placement.json'), rs_dir=str(directory/'rs'),
+            scp_path=str(directory/'placement.json'), rs_dir=str(rs_path),
             expert_cache=args.expert_cache, cache_policy='lru', routing_mode='router', expert_source='router',
             placement_mode='scp_ep', planner_mode='rs_prefetch', prefetch_top_m=2, ep_size=env.world), env, metrics)
         profile = CostProfile(directory/'costs.json', env.world)
@@ -120,39 +143,49 @@ def main():
             dist.barrier(device_ids=[env.local_rank])
         for method in methods:
             select(method)
+            tokens, expected = requests[0]['tokens'].to(env.device), requests[0]['logits']
             actual,_ = sequence(bundle.model,tokens,args.prompt_len,args.cold_decode)
             torch.testing.assert_close(actual,expected,atol=args.atol,rtol=args.rtol)
-        records,orders,canonical = {m:[] for m in methods},[],None
+        records,orders,canonical = {m:[] for m in methods},[],{}
         for repeat in range(args.repeat):
-            order = sorted(methods,key=lambda m:m!='independent') if repeat==0 else list(methods)
-            if repeat: random.Random(20261014+repeat).shuffle(order)
-            orders.append(order)
-            for method in order:
-                select(method)
-                actual,elapsed = sequence(bundle.model,tokens,args.prompt_len,args.cold_decode)
-                torch.testing.assert_close(actual,expected,atol=args.atol,rtol=args.rtol)
-                if not torch.equal(actual.argmax(-1),expected.argmax(-1)): raise AssertionError('native argmax differs')
-                if method=='independent' and canonical is None: canonical=actual.clone()
-                if canonical is not None:
-                    torch.testing.assert_close(actual,canonical,atol=args.atol,rtol=args.rtol)
-                    if not torch.equal(actual.argmax(-1),canonical.argmax(-1)): raise AssertionError('independent argmax differs')
-                policy_stats=[p.summary() for p in policies[method] if p is not None]
-                traffic = {k:getattr(metrics,k,0) for k in ('comm_bytes_activation','comm_bytes_activation_remote',
-                    'comm_bytes_activation_intra_node','comm_bytes_activation_inter_node',
-                    'expert_weight_h2d_bytes','expert_weight_h2d_prefetch_bytes','expert_weight_h2d_demand_bytes',
-                    'cache_hit_count','cache_miss_count','epipe_rs_trigger_count')}
-                records[method].append(dict(repeat=repeat,decode_ms=elapsed[1:],prefill_ms=elapsed[0],
-                    max_native_logit_diff=float((actual-expected).abs().max()),next_tokens_match=True,
-                    policies=policy_stats,prefetch_issued=metrics.prefetch_issued_count,
-                    prefetch_completed=metrics.prefetch_completed_count,traffic=traffic))
-                if env.rank==0: print(json.dumps(dict(status='PASS',method=method,repeat=repeat,
-                    decode_mean_ms=sum(elapsed[1:])/args.steps)),flush=True)
+            request_order = list(range(len(requests)))
+            random.Random(20261014+repeat).shuffle(request_order)
+            for request_index in request_order:
+                request = requests[request_index]
+                tokens, expected = request['tokens'].to(env.device), request['logits']
+                order = sorted(methods,key=lambda m:m!='independent') if repeat==0 else list(methods)
+                if repeat: random.Random(20261014+repeat*1009+request_index).shuffle(order)
+                orders.append(dict(repeat=repeat,request_index=request_index,methods=order))
+                for method in order:
+                    select(method)
+                    actual,elapsed,decode_metrics = sequence(bundle.model,tokens,args.prompt_len,args.cold_decode,metrics)
+                    torch.testing.assert_close(actual,expected,atol=args.atol,rtol=args.rtol)
+                    if not torch.equal(actual.argmax(-1),expected.argmax(-1)): raise AssertionError('native argmax differs')
+                    if method=='independent' and request_index not in canonical: canonical[request_index]=actual.clone()
+                    if request_index in canonical:
+                        torch.testing.assert_close(actual,canonical[request_index],atol=args.atol,rtol=args.rtol)
+                        if not torch.equal(actual.argmax(-1),canonical[request_index].argmax(-1)): raise AssertionError('independent argmax differs')
+                    policy_stats=[p.summary() for p in policies[method] if p is not None]
+                    traffic = {k:getattr(metrics,k,0) for k in ('comm_bytes_activation','comm_bytes_activation_remote',
+                        'comm_bytes_activation_intra_node','comm_bytes_activation_inter_node',
+                        'expert_weight_h2d_bytes','expert_weight_h2d_prefetch_bytes','expert_weight_h2d_demand_bytes',
+                        'cache_hit_count','cache_miss_count','epipe_rs_trigger_count')}
+                    records[method].append(dict(repeat=repeat,request_index=request_index,request_id=request['request_id'],
+                        decode_ms=elapsed[1:],prefill_ms=elapsed[0],decode_metrics=decode_metrics,
+                        max_native_logit_diff=float((actual-expected).abs().max()),next_tokens_match=True,
+                        policies=policy_stats,prefetch_issued=metrics.prefetch_issued_count,
+                        prefetch_completed=metrics.prefetch_completed_count,traffic=traffic))
+                    if env.rank==0: print(json.dumps(dict(status='PASS',method=method,repeat=repeat,request_index=request_index,
+                        decode_mean_ms=sum(elapsed[1:])/args.steps)),flush=True)
         all_records=[None]*env.world
         dist.all_gather_object(all_records,records)
         if env.rank==0:
             args.out_dir.mkdir(parents=True,exist_ok=True)
-            report=dict(purpose='local-policy engineering diagnostic; untrained RS, illustrative costs',
+            report=dict(purpose='matched local-policy engineering diagnostic; see RS and cost provenance',
                 args=vars(args),fixture=fixture,ranks=all_records,orders=orders,
+                rs_dir=str(rs_path),rs_sha256=rs_hashes,rs_bank_manifest=bank_manifest,
+                costs=profile.data,costs_sha256=profile.digest,
+                placement_sha256=hashlib.sha256((directory/'placement.json').read_bytes()).hexdigest(),
                 torch=str(torch.__version__),transformers=transformers.__version__,gpu=torch.cuda.get_device_name(),
                 source_sha256={p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest() for p in
                     ('utils/eval_core.py','utils/lightweight_policy.py','scripts/benchmark_lightweight.py')})

@@ -98,6 +98,23 @@ use deterministic shuffled orders shared by ranks. Logits and next-token argmax
 are checked for each measured request. `--cold-decode` additionally clears the
 expert cache at the prefill/decode boundary; report it separately as a diagnostic.
 
+For trained predictor diagnostics, pass `--rs-dir /path/to/frozen-rs` and
+`--num-requests N`. The benchmark verifies every checkpoint against
+`bank_manifest.json` when present and records checkpoint, placement and cost
+hashes in the result. Each rank's native reference may contain a `requests` list
+of dictionaries with `tokens`, `logits` and `request_id`, using the same signature
+as the single-request fixture. Requests and method order are shuffled
+deterministically between rounds. Every measured request is checked against its
+native and independent outputs. A fixture with `dataset_path` and `dataset_sha256`
+also verifies that the dataset file has not changed.
+
+`decode_metrics` records numeric counter differences after prefill, keeping
+decode H2D, cache and communication measurements distinct from whole-request
+traffic. Platform cost provenance and `calibrated` status are copied into the
+report; partially measured profiles must retain `calibrated=false` while any
+decision cost remains estimated. A trained RS bank alone does not turn an
+engineering diagnostic into a paper-scale performance result.
+
 ## Current evidence
 
 Tested serving core is `f28c880`. Later commits add serving component switches,
