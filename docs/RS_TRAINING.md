@@ -55,6 +55,12 @@ CUDA_VISIBLE_DEVICES=0 python scripts/train_next_layer_rs.py \
 python scripts/freeze_rs_bank.py --rs-dir /path/to/rs-v1 --model-path /path/to/model
 ```
 
+Dataset-token profiling calls the native decoder directly and skips the unused
+LM head. It retains stepwise KV-cache execution and the same gate hooks and
+labels. Generated-token profiling still runs the complete causal LM to select
+each next token. Choose the collection batch with an untimed memory pilot; the
+manifest records the batch and forward path.
+
 Native profiling produces 32,768 token records per MoE layer in this setup.
 Dataset continuation is teacher forced. Free-generation accuracy and longer
 prompts are separate distribution checks before paper-scale serving claims.

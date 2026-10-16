@@ -86,6 +86,12 @@ def _ensure_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
+def _profiling_model(model, decode_token_source: str):
+    # Dataset tokens supply the next input, so the LM head has no consumer.
+    # Keep the native decoder, KV cache and gate hooks identical to generation.
+    return model.model if decode_token_source == "dataset" else model
+
+
 def _torch_save_atomic(obj, path: Path) -> None:
     tmp = path.with_name(path.name + ".tmp")
     torch.save(obj, tmp)
@@ -299,6 +305,7 @@ class NextLayerRSProfiler:
             dataset_sha256=hashlib.sha256(Path(args.dataset).read_bytes()).hexdigest(),
             input_feature='native MoE gate input hidden; FP16 capture, FP32 predictor input',
             label='same-token next-layer native router top-k',
+            forward_model='native decoder without LM head' if args.decode_token_source == 'dataset' else 'native causal LM',
             torch=str(torch.__version__), seed=int(args.seed),
         )
 
@@ -431,17 +438,21 @@ class NextLayerRSProfiler:
         if str(self.args.decode_token_source) == "dataset":
             target_ids = ids[:, prompt_len:prompt_len + decode_steps].to(self.first_device)
         batch_size = int(prompt_ids.shape[0])
+        forward_model = _profiling_model(self.model, str(self.args.decode_token_source))
 
         self.capture_enabled = False
         with torch.no_grad():
-            prefill = self.model(
+            prefill = forward_model(
                 input_ids=prompt_ids,
                 attention_mask=torch.ones_like(prompt_ids, device=prompt_ids.device),
                 use_cache=True,
                 return_dict=True,
             )
         past_key_values = prefill.past_key_values
-        generated_input = torch.argmax(prefill.logits[:, -1, :], dim=-1, keepdim=True)
+        generated_input = None
+        if target_ids is None:
+            generated_input = torch.argmax(prefill.logits[:, -1, :], dim=-1, keepdim=True)
+        del prefill
 
         for step in range(decode_steps):
             self.current_capture = {}
@@ -457,7 +468,7 @@ class NextLayerRSProfiler:
 
             self.capture_enabled = True
             with torch.no_grad():
-                out = self.model(
+                out = forward_model(
                     input_ids=cur_input,
                     attention_mask=cur_attn_mask,
                     past_key_values=past_key_values,
@@ -468,6 +479,7 @@ class NextLayerRSProfiler:
             past_key_values = out.past_key_values
             if target_ids is None:
                 generated_input = torch.argmax(out.logits[:, -1, :], dim=-1, keepdim=True)
+            del out
 
             missing_layers = [l for l in self.moe_layer_indices if l not in self.current_capture]
             if missing_layers:
