@@ -55,6 +55,7 @@ class RunScriptTest(unittest.TestCase):
             )
             self.assertIn("--batch 4", completed.stdout)
             self.assertIn("--max-new 128", completed.stdout)
+            self.assertIn("--save-output-tokens", completed.stdout)
             self.assertIn("SPARSE_SIM_ENABLE_WEAKNET=0", completed.stdout)
             self.assertIn("SPARSE_LIGHT_ENABLE=0", completed.stdout)
             self.assertIn("SPARSE_RS_PREFETCH_TOP_M_BY_RANK=1\\,1\\,1\\,1", completed.stdout)

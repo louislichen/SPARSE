@@ -214,6 +214,7 @@ CMD=("${LAUNCHER[@]}" scripts/perf.py
   --warmup "${WARMUP:-1}"
   --out-dir "${OUT_DIR}"
   --run-tag "${METHOD}"
+  --save-output-tokens
   --measure-ttft)
 
 ENV_ARGS=(env

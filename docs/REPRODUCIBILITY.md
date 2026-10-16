@@ -114,6 +114,11 @@ node with a logical planning map, disclose that distinction.
 
 ## Runtime Matrices
 
+Formal launchers save each rank's input and generated tokens under
+`output_tokens/` after the timed interval. Compare these files with a frozen
+native-model reference before accepting performance rows. Saving tokens does
+not by itself establish correctness or check intermediate logits.
+
 Full SPARSE runtime:
 
 ```bash

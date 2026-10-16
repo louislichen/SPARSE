@@ -3695,6 +3695,8 @@ def main() -> None:
     ap.add_argument("--log-per-layer", action="store_true")
     ap.add_argument("--collect-per-layer", action="store_true")
     ap.add_argument("--measure-ttft", action="store_true")
+    ap.add_argument("--save-output-tokens", action="store_true",
+                    help="Save per-rank input/generated tokens after timing for correctness auditing.")
 
     ap.add_argument("--warmup", type=int, default=3)
     ap.add_argument("--repeat", type=int, default=1)
@@ -3966,6 +3968,14 @@ def main() -> None:
 
         metrics.wall_total_ms = wt_total() * 1000.0
         metrics.gen_tokens = int((out_ids.shape[1] - input_ids.shape[1]) * out_ids.shape[0])
+        if args.save_output_tokens:
+            token_dir = Path(args.out_dir) / "output_tokens"
+            token_dir.mkdir(parents=True, exist_ok=True)
+            (token_dir / f"rank{env.rank}.repeat{rep_idx}.json").write_text(
+                json.dumps({"rank": env.rank, "repeat": rep_idx,
+                            "prompt_len": int(input_ids.shape[1]),
+                            "input_ids": input_ids.detach().cpu().tolist(),
+                            "output_ids": out_ids.detach().cpu().tolist()}), encoding="utf-8")
         del out_ids
         gc.collect()
         torch.cuda.empty_cache()
