@@ -73,14 +73,44 @@ See [RS_TRAINING.md](RS_TRAINING.md) for a pinned C4 pilot and checkpoint freezi
 `profile_scp.sh` collects prefill routing traces from round-robin execution on
 the physical four-rank topology. Node 0 gathers rank-local files and merges
 train and validation profiles. `solve_scp.sh` selects the replicated SCP objective.
-The current release is missing `scripts/scp_cache_replay.py`, which this objective
-requires. Full SCP regeneration is pending restoration of that helper. Runtime
-runs with supplied placements do not invoke it. Ordinary C4 profile merging does
-not require the optional TaskLocal extension.
+The reconstructed `scripts/scp_cache_replay.py` groups all source ranks in each
+MoE invocation and coalesces expert requests at their destination before
+layer-local LRU replay. It is a replacement for the unavailable original helper,
+not an archival recovery. Generic C4 replay uses the supplied rank-to-node map
+and requires no optional TaskLocal labels. Cache replay errors abort the
+tail-headroom solver instead of disabling its cache/H2D guard.
+
+With `expert_weight_bytes` and measured `h2d_bw_MBps_by_rank` in the topology,
+loading estimates use payload bytes divided by per-rank bandwidth. Otherwise
+they use relative expert-miss units, explicitly marked as uncalibrated; numerical
+H2D milliseconds in that case are proxies. Aggregate expert-count traces omit
+per-token order, and replay follows expert-ID segment order. Actual serving,
+including the RS policy and prefill transient handling, remains necessary to
+accept a placement. RS behavior is never inferred from router demand alone.
 
 For full profile regeneration, expect many hours because 320 distributed shards
 load and execute the model. Runtime-only evaluation with supplied offline files is
 substantially shorter and is the preferred review workflow.
+
+`scripts/profile_scp_stream.py` avoids reloading weights for each shard. Launch
+it through torchrun with the same world size, rank map and dataset on all ranks:
+
+```bash
+torchrun --nproc_per_node=2 --nnodes=2 --node_rank=0 \
+  --master_addr=REPLACE_WITH_NODE0_ADDRESS --master_port=29671 \
+  scripts/profile_scp_stream.py --model-path "$MODEL_PATH" \
+  --dataset "$C4_PROFILE_TRAIN" --out /path/to/train_shards \
+  --split train --shards 256
+```
+
+Use node rank 1 on the second node; repeat for validation with 64 shards. Each
+shard clears its expert cache and profile state. Defaults retain batch 2, prompt
+512, shard stride 4 and identical inputs across ranks, as in the original
+launcher. `--rank-stride` explicitly changes the last behavior. Stored token IDs
+are accepted to preserve exact prompt lengths; their tokenizer must match the
+model. Copy all rank files before merging. These files contain routing demand;
+the collector does not report serving performance. If collected on one physical
+node with a logical planning map, disclose that distinction.
 
 ## Runtime Matrices
 

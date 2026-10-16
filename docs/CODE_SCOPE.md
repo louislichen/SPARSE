@@ -35,5 +35,5 @@ The following research-workspace material is deliberately absent:
 `scripts/validate_release.sh` checks shell syntax, Python compilation, available
 CPU tests, private infrastructure strings, and accidentally included binary
 files. It does not verify CUDA execution or the complete offline pipeline.
-Training tests require PyTorch and otherwise report skips. The missing SCP
-cache-replay dependency is documented in `REPRODUCIBILITY.md`.
+Training tests require PyTorch and otherwise report skips. The reconstructed
+SCP replay's proxy semantics and limitations are documented in `REPRODUCIBILITY.md`.

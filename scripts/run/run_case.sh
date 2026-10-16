@@ -172,6 +172,11 @@ cat >"${OUT_DIR}/case_config.json" <<EOF
   "cache_by_rank": "${CACHE_BY_RANK_CURRENT}",
   "prefetch_top_m": ${PREFETCH_TOP_M_CURRENT},
   "prediction_top_k": ${PREDICTION_TOP_K_CURRENT},
+  "light_policy_enabled": false,
+  "rs_min_score": 0.04,
+  "rs_replace_advantage": 0.08,
+  "rs_replace_ratio": 1.20,
+  "rs_recent_protect_steps": 1,
   "prefetch_top_m_by_rank": "${PREFETCH_TOP_M_RANKS}",
   "prediction_top_k_by_rank": "${PREDICTION_TOP_K_RANKS}"
 }
@@ -222,6 +227,7 @@ ENV_ARGS=(env
   "TOKENIZERS_PARALLELISM=false"
   "OMP_NUM_THREADS=1"
   "TORCHDYNAMO_DISABLE=1"
+  "SPARSE_LIGHT_ENABLE=0"
   "SPARSE_EXPERT_CACHE_BY_RANK=${CACHE_BY_RANK_CURRENT}"
   "SPARSE_SCP_EP_PLACEMENT=${PLACEMENT_PATH}"
   "SPARSE_SCP_APPLY_PREFILL=${SCP_PREFILL}"

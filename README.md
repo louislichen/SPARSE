@@ -118,10 +118,10 @@ For a runtime-only reproduction, place the model-specific frozen RS checkpoint
 directory and SCP placement JSON at `RS_DIR` and `SCP_PATH` on both nodes. This
 is the recommended reproduction path.
 
-Full SCP placement regeneration currently requires the missing
-`scripts/scp_cache_replay.py` helper. Runtime evaluation can use existing
-model-specific placements. See [reproduction limitations](docs/REPRODUCIBILITY.md)
-for the artifact requirements and the metric and training corrections.
+SCP regeneration uses the reconstructed `scripts/scp_cache_replay.py` helper.
+It checks grouped communication and reactive LRU loading proxies; these estimates
+must still be validated with timed serving. See [reproduction details](docs/REPRODUCIBILITY.md)
+for its limits and the metric and training corrections.
 
 To regenerate RS:
 

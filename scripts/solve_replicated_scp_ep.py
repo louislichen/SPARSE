@@ -1177,7 +1177,10 @@ def _runtime_packet_metrics_from_table(
     """
     if grouped_trace_indices is None:
         raise RuntimeError("runtime packet replay requires scripts/scp_cache_replay.py")
-    _require_task_local_profile(trace_profile)
+    required = ("trace_stage", "trace_layer", "trace_source_rank", "trace_expert", "trace_count")
+    missing = [key for key in required if key not in trace_profile]
+    if missing:
+        raise ValueError(f"runtime packet replay requires ordered trace fields: {missing}")
     groups = grouped_trace_indices(trace_profile, stage=stage if str(stage).lower() in ("prefill", "decode") else "all")
     if not groups:
         return {
@@ -1195,7 +1198,9 @@ def _runtime_packet_metrics_from_table(
     node_ids = [int(model.rank_to_node.get(int(r), int(r))) for r in range(int(model.world))]
     trace_layers = trace_profile["trace_layer"].astype(np.int64)
     trace_sources = trace_profile["trace_source_rank"].astype(np.int64)
-    trace_nodes = trace_profile["trace_source_node"].astype(np.int64)
+    # Physical routing depends on the experiment topology. Ordinary C4 profiles
+    # need no task labels; legacy merge files may default source_node to rank.
+    trace_nodes = np.asarray([node_ids[int(s)] for s in trace_sources], dtype=np.int64)
     trace_experts = trace_profile["trace_expert"].astype(np.int64)
     trace_counts = trace_profile["trace_count"].astype(np.int64)
     world = int(model.world)
@@ -3313,20 +3318,19 @@ def solve_tail_headroom_scp_v2(
     accepted_since_validation = 0
     validation_failed = False
     if optimistic_headroom_pct >= float(cfg.min_tail_headroom_pct) and budget > 0:
-        if evaluate_profile_placement_with_cache_replay is not None:
-            try:
-                rr_cache = _cache_replay_metrics(
-                    trace_profile=trace_profile,
-                    topology=topology,
-                    replicas=rr_replicas,
-                    model=model,
-                    cfg=cfg,
-                    layers=layers,
-                    experts=experts,
-                    mode="no_rs",
-                )
-            except Exception:
-                rr_cache = None
+        # Cache admission is part of this objective, not an optional report.
+        # A malformed trace or missing replay must fail instead of silently
+        # admitting replicas without the promised H2D/cache guard.
+        rr_cache = _cache_replay_metrics(
+            trace_profile=trace_profile,
+            topology=topology,
+            replicas=rr_replicas,
+            model=model,
+            cfg=cfg,
+            layers=layers,
+            experts=experts,
+            mode="no_rs",
+        )
         for _step in range(budget):
             bottleneck_info = _state_bottleneck_info(state, top_fraction=0.20)
             bottleneck_node = int(bottleneck_info["bottleneck_node"])
