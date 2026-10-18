@@ -222,6 +222,12 @@ retain white padding rather than changing aspect ratio.
 - The router remains authoritative. RS changes cache preparation; SCP changes
   feasible expert location; EPIPE changes only post-routing execution order.
 
+An optional `SPARSE_PREFILL_EXPERT_MATH=fixed64` mode keeps prefill expert
+reduction tiles fixed across row regrouping. It defines a distinct numerical
+version and must be applied to every comparator. See
+[fixed prefill math](docs/FIXED_PREFILL_MATH.md) for requirements and validation
+limits; the default remains `native`.
+
 See [docs/REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md) for the frozen protocol
 and [docs/RUNNING_THE_CODE.md](docs/RUNNING_THE_CODE.md) for expected
 reviewer workflows and outputs. [docs/CODE_SCOPE.md](docs/CODE_SCOPE.md)

@@ -2882,6 +2882,7 @@ def reduce_and_build_perf_record(metrics: Metrics, args, env: DistEnv, num_exper
         "epipe_enable": int(os.environ.get("SPARSE_EPIPE_ENABLE", "0").strip().lower() not in ("0", "false", "no", "off")),
         "epipe_shadow": int(os.environ.get("SPARSE_EPIPE_SHADOW", "0").strip().lower() not in ("0", "false", "no", "off")),
         "epipe_mode": str(os.environ.get("SPARSE_EPIPE_MODE", "upfront_scan")),
+        "prefill_expert_math": str(os.environ.get("SPARSE_PREFILL_EXPERT_MATH", "native")).strip().lower(),
         "epipe_decode_rs_mode": str(os.environ.get("SPARSE_EPIPE_DECODE_RS_MODE", os.environ.get("SPARSE_EPIPE_DECODE_WITH_RS_MODE", "late_only"))),
         "epipe_decode_with_rs_mode": str(os.environ.get("SPARSE_EPIPE_DECODE_WITH_RS_MODE", os.environ.get("SPARSE_EPIPE_DECODE_RS_MODE", "late_only"))),
         "epipe_debug_counters": int(os.environ.get("SPARSE_EPIPE_DEBUG_COUNTERS", "0").strip().lower() not in ("0", "false", "no", "off")),

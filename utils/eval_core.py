@@ -4793,6 +4793,9 @@ class DistributedSparseMoeBlock(nn.Module):
 
         self.expert_offload = str(expert_offload)
         self._native_decode_granularity = _env_flag("SPARSE_EP_NATIVE_DECODE_GRANULARITY", "0")
+        self._prefill_expert_math = str(os.environ.get("SPARSE_PREFILL_EXPERT_MATH", "native")).strip().lower()
+        if self._prefill_expert_math not in ("native", "fixed64"):
+            raise ValueError("SPARSE_PREFILL_EXPERT_MATH must be native or fixed64")
         if self.expert_offload not in ("cpu", "gpu"):
             raise ValueError(f"expert_offload must be cpu|gpu, got {self.expert_offload}")
 
@@ -11769,6 +11772,11 @@ class DistributedSparseMoeBlock(nn.Module):
         keeps the native per-token arithmetic without changing router decisions.
         It is a shared executor option, independent of scheduling policy.
         """
+        if getattr(self, "_prefill_expert_math", "native") == "fixed64" and self._current_stage() == "prefill":
+            # Lazy import keeps the default runtime usable without Triton.
+            # Explicit fixed64 must fail rather than silently change numerics.
+            from utils.kernels.fixed_tile_expert import expert
+            return expert(cur, gw, uw, dw, row_tile=64)
         native_items = (
             bool(getattr(self, "_native_decode_granularity", False))
             and self._current_stage() == "decode"
