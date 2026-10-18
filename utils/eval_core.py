@@ -16613,11 +16613,11 @@ class DistributedSparseMoeBlock(nn.Module):
 
     @classmethod
     def demote_prefill_scp_transients_for_decode(cls, metrics: Optional[Metrics] = None) -> None:
-        if bool(getattr(cls, "prefill_scp_transient_demoted_for_decode", False)):
+        if bool(getattr(SparseContext, "prefill_scp_transient_demoted_for_decode", False)):
             return
         total_start = 0
         total_demoted = 0
-        for blk in list(getattr(cls, "layer_blocks", {}).values()):
+        for blk in list(getattr(SparseContext, "layer_blocks", {}).values()):
             cache = getattr(blk, "_cache", None)
             try:
                 ids = getattr(cache, "prefill_scp_transient_ids", lambda: [])()
@@ -16634,14 +16634,14 @@ class DistributedSparseMoeBlock(nn.Module):
             metrics.prefill_scp_transient_resident_at_decode_start += int(total_start)
             metrics.prefill_scp_transient_demote_count += int(total_demoted)
             metrics.epipe_prefill_transient_demote_count += int(total_demoted)
-        cls.prefill_scp_transient_demoted_for_decode = True
+        SparseContext.prefill_scp_transient_demoted_for_decode = True
 
     @classmethod
     def record_prefill_scp_transient_decode_end(cls, metrics: Optional[Metrics] = None) -> None:
         if metrics is None:
             return
         total_end = 0
-        for blk in list(getattr(cls, "layer_blocks", {}).values()):
+        for blk in list(getattr(SparseContext, "layer_blocks", {}).values()):
             cache = getattr(blk, "_cache", None)
             try:
                 ids = getattr(cache, "prefill_scp_transient_ids", lambda: [])()
