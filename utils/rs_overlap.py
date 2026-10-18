@@ -56,7 +56,7 @@ class GraphPrediction:
 
 
 class BoundedRS:
-    def __init__(self, core, *, slots=4, empty_steps=16):
+    def __init__(self, core, *, slots=4, empty_steps=0):
         import torch
         self.torch, self.core = torch, core
         self.enabled = False
@@ -65,13 +65,45 @@ class BoundedRS:
         self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='rs-staging')
         self.graphs, self.buffers, self.jobs, self.retired = {}, {}, {}, []
         self.slots, self.views, self.templates = [], {}, {}
-        self.next_probe, self.allowed = {}, {}
+        self.next_probe, self.allowed, self.cooldown_residents = {}, {}, {}
         self.pending_completion_metrics = []
         self.pending_accuracy = {}
         self.epoch, self.stream, self.copy_stream = 0, None, None
         self.owner = threading.get_ident()
         self.originals, self.wrappers = {}, {}
         self.stats = {}
+
+    def configure(self, *, empty_steps):
+        """Configure the actual predictor, only between drained requests."""
+        if type(empty_steps) is not int or empty_steps < 0:
+            raise ValueError('empty_steps must be a nonnegative integer')
+        assert not self.jobs and not self.retired and not self.views
+        self.empty_steps = empty_steps
+        self.next_probe.clear()
+        self.cooldown_residents.clear()
+
+    def note_demand_miss(self, block):
+        """A new actual miss invalidates the target's stale empty forecast."""
+        layer = int(block.layer_idx)
+        self.stats['observed_decode_misses'] += 1
+        if self.next_probe.pop(layer, None) is not None:
+            self.cooldown_residents.pop(layer, None)
+            self.stats['cooldown_miss_invalidations'] += 1
+
+    def _skip_cooldown(self, layer, step):
+        deadline = self.next_probe.get(layer, 0)
+        if step >= deadline:
+            self.next_probe.pop(layer, None)
+            self.cooldown_residents.pop(layer, None)
+            return False
+        resident = frozenset(self.views[layer].resident_ids())
+        if resident != self.cooldown_residents[layer]:
+            self.next_probe.pop(layer, None)
+            self.cooldown_residents.pop(layer, None)
+            self.stats['cooldown_cache_invalidations'] += 1
+            return False
+        self.stats['skipped_cooldown'] += 1
+        return True
 
     def _weights(self, block, eid):
         if block.experts_kind == 'fused':
@@ -127,7 +159,7 @@ class BoundedRS:
     def begin(self, case):
         assert not self.jobs and not self.retired and not self.views
         self.epoch += 1
-        self.case, self.next_probe = case, {}
+        self.case, self.next_probe, self.cooldown_residents = case, {}, {}
         assert not self.pending_completion_metrics
         assert not self.pending_accuracy
         self.stats = dict(predictions=0, plans=0, source_joins=0, issued=0, used=0,
@@ -138,6 +170,11 @@ class BoundedRS:
                           demand_deadline_activations=0,
                           empty_plan_closes=0, unplanned_closes=0,
                           planned_no_publish_closes=0,
+                          effective_empty_steps=self.empty_steps,
+                          observed_decode_misses=0, cooldown_miss_invalidations=0,
+                          cooldown_cache_invalidations=0,
+                          candidate_nonlocal_entries=0, candidate_resident_entries=0,
+                          candidate_scored=0, candidate_below_threshold=0,
                           retained=0, recycled_payloads=0, allocated_replacements=0,
                           staging_bytes=sum(s['nbytes'] for s in self.slots))
         if not self.enabled:
@@ -170,6 +207,8 @@ class BoundedRS:
             row = job.future.result()  # Already completed: never a layer join.
             self.stats['worker_ms'] += row['worker_ms']
             self.stats['readback_wait_ms'] += row['readback_wait_ms']
+            for key, value in row.get('candidate_counts', {}).items():
+                self.stats['candidate_' + key] += value
             used_slots = {id(x.slot) for x in transferred.values()}
             for slot in job.slots:
                 if id(slot) not in used_slots:
@@ -189,6 +228,7 @@ class BoundedRS:
         t = self.torch
         started = time.perf_counter()
         waited = 0.
+        counts = {}
         # Snapshot-only planning. No live cache or metrics mutation here.
         with t.cuda.device(target.device), t.inference_mode():
             stamp = time.perf_counter()
@@ -197,7 +237,7 @@ class BoundedRS:
             if not job.closed:
                 chosen = select_candidates(ids.reshape(-1).tolist(), weights.float().reshape(-1).tolist(),
                     allowed=self.allowed[target.layer_idx], resident=resident,
-                    minimum=minimum, budget=len(job.slots))
+                    minimum=minimum, budget=len(job.slots), diagnostics=counts)
                 job.plan_count = len(chosen)
                 for eid, slot in zip(chosen, job.slots):
                     source = self.templates[target.layer_idx][eid]
@@ -209,7 +249,8 @@ class BoundedRS:
                         return Transfer(eid, slot['payload'], slot['event'], slot, slot['nbytes'])
                     if not job.publish(eid, submit):
                         break
-        return dict(worker_ms=(time.perf_counter() - started)*1000, readback_wait_ms=waited)
+        return dict(worker_ms=(time.perf_counter() - started)*1000, readback_wait_ms=waited,
+                    candidate_counts=counts)
 
     def predict(self, block, x, seq_len, source_idx=None, source_w=None):
         if not self.enabled or seq_len != 1 or block.planner_mode != 'rs_prefetch':
@@ -223,8 +264,7 @@ class BoundedRS:
         assert ctx.rs_bank_source_layers[target_layer] == block.layer_idx
         target = ctx.layer_blocks[target_layer]
         step = int(ctx.runtime_call_id)
-        if step < self.next_probe.get(target_layer, 0):
-            self.stats['skipped_cooldown'] += 1
+        if self.empty_steps and self._skip_cooldown(target_layer, step):
             return
         # Do not reuse graph/host buffers while an old worker can still read.
         self._collect()
@@ -273,8 +313,9 @@ class BoundedRS:
         ticket = (self.epoch, int(self.core.SparseContext.runtime_call_id), layer)
         assert job.ticket == ticket, 'Stale prediction crossed a request/step boundary'
         self.retired.append((job, transfers))
-        if job.plan_count == 0:
+        if job.plan_count == 0 and self.empty_steps:
             self.next_probe[layer] = ticket[1] + self.empty_steps + 1
+            self.cooldown_residents[layer] = frozenset(view.resident_ids())
         if not transfers:
             self.stats['closed_before_publish'] += 1
             if job.plan_count is None:
@@ -396,7 +437,7 @@ class BoundedRS:
         cls, owner = self.core.DistributedSparseMoeBlock, self
         for name in ('_compute_and_schedule_next_layer_rs', 'forward',
                      '_record_prefetch_eval_actual', '_execute_local_recv_groups',
-                     '_experts_world1_exact',
+                     '_experts_world1_exact', '_record_cache_miss',
                      '_try_execute_local_recv_groups_epipe_rs_residual_scan'):
             self.originals[name] = getattr(cls, name)
         def predict(block, *args, **kwargs):
@@ -427,6 +468,11 @@ class BoundedRS:
             if owner.enabled and block._current_stage() == 'decode':
                 owner.activate_at_demand(block)
             return owner.originals['_experts_world1_exact'](block, *args, **kwargs)
+        def miss(block, *args, **kwargs):
+            result = owner.originals['_record_cache_miss'](block, *args, **kwargs)
+            if owner.enabled and block._current_stage() == 'decode':
+                owner.note_demand_miss(block)
+            return result
         self.upfront = cls._try_execute_local_recv_groups_epipe
         def execute(block, *args, **kwargs):
             if owner.enabled and block._current_stage() == 'decode':
@@ -437,6 +483,7 @@ class BoundedRS:
                             _record_prefetch_eval_actual=record,
                             _execute_local_recv_groups=local_execute,
                             _experts_world1_exact=world1_execute,
+                            _record_cache_miss=miss,
                             _try_execute_local_recv_groups_epipe_rs_residual_scan=execute)
         for name, fn in self.wrappers.items():
             setattr(cls, name, fn)

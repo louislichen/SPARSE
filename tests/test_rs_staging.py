@@ -221,9 +221,12 @@ class StagingTest(unittest.TestCase):
                 events.append('accuracy')
             def _execute_local_recv_groups(self):
                 events.append('demand')
+                self._record_cache_miss()
                 return 'result'
             def _experts_world1_exact(self):
                 return self._execute_local_recv_groups()
+            def _record_cache_miss(self):
+                events.append('native-miss')
             def _try_execute_local_recv_groups_epipe(self):
                 pass
             def _try_execute_local_recv_groups_epipe_rs_residual_scan(self):
@@ -248,15 +251,65 @@ class StagingTest(unittest.TestCase):
             owner.jobs.pop(block.layer_idx)
         owner.activate = activate
         owner.release = lambda _: events.append('release')
+        owner.note_demand_miss = lambda _: events.append('wake')
         owner.pool = NS(shutdown=lambda **kwargs: None)
         owner.install()
         try:
             self.assertEqual(Block().forward(NS(shape=(4, 1, 2048))), 'result')
-            self.assertEqual(events, ['router', 'dispatch', 'close', 'accuracy', 'demand', 'release'])
+            self.assertEqual(events, ['router', 'dispatch', 'close', 'accuracy', 'demand', 'native-miss', 'wake', 'release'])
             self.assertEqual(owner.pending_accuracy, {})
             self.assertEqual(owner.stats['demand_deadline_activations'], 1)
         finally:
             owner.restore()
+
+    def cooldown_owner(self, empty_steps=16):
+        owner = BoundedRS.__new__(BoundedRS)
+        owner.jobs, owner.retired, owner.views = {}, [], {1:self.view}
+        owner.next_probe, owner.cooldown_residents = {1:27}, {1:frozenset({0,4})}
+        owner.empty_steps = empty_steps
+        owner.stats = dict(observed_decode_misses=0, cooldown_miss_invalidations=0,
+                           cooldown_cache_invalidations=0, skipped_cooldown=0)
+        return owner
+
+    def test_new_demand_miss_wakes_target_after_empty_prediction(self):
+        owner = self.cooldown_owner()
+        self.assertTrue(owner._skip_cooldown(1, 11))
+        owner.note_demand_miss(NS(layer_idx=1))
+        self.assertFalse(owner._skip_cooldown(1, 12))
+        self.assertEqual(owner.stats['cooldown_miss_invalidations'], 1)
+
+    def test_cache_contents_change_wakes_target_without_a_miss(self):
+        owner = self.cooldown_owner()
+        self.cache.put(8, 'w8')
+        self.assertFalse(owner._skip_cooldown(1, 11))
+        self.assertEqual(owner.stats['cooldown_cache_invalidations'], 1)
+
+    def test_recency_only_change_does_not_invalidate_empty_snapshot(self):
+        owner = self.cooldown_owner()
+        self.view.get(0)
+        self.assertTrue(owner._skip_cooldown(1, 11))
+        self.assertFalse(owner._skip_cooldown(1, 27))
+
+    def test_effective_gate_configuration_is_drained_and_explicit(self):
+        owner = self.cooldown_owner()
+        owner.views.clear()
+        owner.configure(empty_steps=0)
+        self.assertEqual(owner.empty_steps, 0)
+        self.assertEqual(owner.next_probe, {})
+        self.assertEqual(owner.cooldown_residents, {})
+        with self.assertRaises(ValueError):
+            owner.configure(empty_steps=-1)
+        with self.assertRaises(ValueError):
+            owner.configure(empty_steps=True)
+        owner.jobs[1] = object()
+        with self.assertRaises(AssertionError):
+            owner.configure(empty_steps=16)
+
+    def test_candidate_diagnostics_preserve_selection_and_explain_empty(self):
+        diag = {}
+        self.assertEqual(select_candidates([0,1,8], [.9,.9,.01], allowed={0,8},
+            resident={0}, minimum=.2, budget=2, diagnostics=diag), [])
+        self.assertEqual(diag, dict(nonlocal_entries=1, resident_entries=1, scored=1, below_threshold=1))
 
 
 if __name__ == '__main__':

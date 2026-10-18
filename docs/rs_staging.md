@@ -27,13 +27,14 @@ accuracy accounting, so delaying consumption does not remove that measurement.
 Use a fresh service version and install before constructing measured requests:
 
 ```python
-pipeline = BoundedRS(eval_core, slots=4, empty_steps=16)
+pipeline = BoundedRS(eval_core, slots=4, empty_steps=0)
 pipeline.install()
 # After model / CPU-offload weights / RS bank have loaded, outside request timing:
 pipeline.prepare_graphs(batch=batch, dtype=torch.float16, k=8)
 
 # After the ordinary strict request reset, inside the service wall timer:
 pipeline.enabled = use_rs
+pipeline.configure(empty_steps=effective_empty_steps)
 pipeline.begin(request_id)
 try:
     outputs = original_greedy_decode(...)
@@ -67,3 +68,10 @@ python3 -m unittest tests.test_rs_staging
 ```
 
 Private deployment experiments and weights are intentionally outside this repo.
+
+Empty-plan cooldown is disabled by default. If explicitly enabled, a true
+decode demand miss or a change in the target's resident expert set invalidates
+the old empty forecast. LRU recency alone does not invalidate it. Configure the
+actual `BoundedRS` object between drained requests; settings on a separate
+planner do not control this pipeline. Each request records `effective_empty_steps`,
+miss/cache invalidations, and candidate rejection counts in its statistics.

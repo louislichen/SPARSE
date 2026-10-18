@@ -94,17 +94,25 @@ class DemandCacheView:
         return self.resident.resident_ids()
 
 
-def select_candidates(ids, weights, *, allowed, resident, minimum, budget):
+def select_candidates(ids, weights, *, allowed, resident, minimum, budget, diagnostics=None):
     """Original aggregate probability/reuse score, with no victim selection."""
     sums, counts, maxima = {}, {}, {}
+    nonlocal_entries = resident_entries = 0
     for eid, weight in zip(ids, weights):
         eid, weight = int(eid), float(weight)
-        if eid not in allowed or eid in resident:
+        if eid not in allowed:
+            nonlocal_entries += 1
+            continue
+        if eid in resident:
+            resident_entries += 1
             continue
         sums[eid] = sums.get(eid, 0.0) + weight
         counts[eid] = counts.get(eid, 0) + 1
         maxima[eid] = max(maxima.get(eid, 0.0), weight)
     scores = {eid: value * (1 + .15 * (counts[eid] - 1)) + .05 * maxima[eid]
               for eid, value in sums.items()}
+    if diagnostics is not None:
+        diagnostics.update(nonlocal_entries=nonlocal_entries, resident_entries=resident_entries,
+                           scored=len(scores), below_threshold=sum(v < minimum for v in scores.values()))
     return [eid for eid in sorted(scores, key=scores.get, reverse=True)
             if scores[eid] >= minimum][:budget]
