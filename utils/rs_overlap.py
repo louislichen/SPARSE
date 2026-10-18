@@ -67,6 +67,7 @@ class BoundedRS:
         self.slots, self.views, self.templates = [], {}, {}
         self.next_probe, self.allowed = {}, {}
         self.pending_completion_metrics = []
+        self.pending_accuracy = {}
         self.epoch, self.stream, self.copy_stream = 0, None, None
         self.owner = threading.get_ident()
         self.originals, self.wrappers = {}, {}
@@ -128,11 +129,15 @@ class BoundedRS:
         self.epoch += 1
         self.case, self.next_probe = case, {}
         assert not self.pending_completion_metrics
+        assert not self.pending_accuracy
         self.stats = dict(predictions=0, plans=0, source_joins=0, issued=0, used=0,
                           wasted=0, closed_before_publish=0, skipped_slots=0,
                           skipped_cooldown=0, worker_ms=0., readback_wait_ms=0.,
                           main_submission_ms=0., target_close_ms=0., request_drain_ms=0.,
                           unified_epipe_calls=0,
+                          demand_deadline_activations=0,
+                          empty_plan_closes=0, unplanned_closes=0,
+                          planned_no_publish_closes=0,
                           retained=0, recycled_payloads=0, allocated_replacements=0,
                           staging_bytes=sum(s['nbytes'] for s in self.slots))
         if not self.enabled:
@@ -272,6 +277,12 @@ class BoundedRS:
             self.next_probe[layer] = ticket[1] + self.empty_steps + 1
         if not transfers:
             self.stats['closed_before_publish'] += 1
+            if job.plan_count is None:
+                self.stats['unplanned_closes'] += 1
+            elif job.plan_count == 0:
+                self.stats['empty_plan_closes'] += 1
+            else:
+                self.stats['planned_no_publish_closes'] += 1
         view.staged = transfers
         block._prefetch_current_group_start = layer
         block._prefetch_current_group_end = layer + 1
@@ -283,6 +294,15 @@ class BoundedRS:
             block._record_rs_counter('prefetch_issued_count', 1)
             block._record_rs_counter('prefetch_admitted_count', 1)
             self.stats['issued'] += 1
+
+    def activate_at_demand(self, block):
+        """Keep publication open through router and EP dispatch, without a join."""
+        self.activate(block)
+        self.stats['demand_deadline_activations'] += 1
+        actual = self.pending_accuracy.pop(int(block.layer_idx), None)
+        if actual is not None:
+            idx, seq_len = actual
+            self.originals['_record_prefetch_eval_actual'](block, idx, seq_len)
 
     def _retain_used(self, block, transfer):
         """Commit a real demand after the layer; exchange ownership, not bytes.
@@ -352,6 +372,7 @@ class BoundedRS:
             for transfer in transfers.values():
                 self._retire(transfer.slot, transfer.event)
         self.jobs.clear()
+        self.pending_accuracy.clear()
         for job, _ in self.retired:
             job.future.result(timeout=30)
         self._collect()
@@ -374,19 +395,38 @@ class BoundedRS:
     def install(self):
         cls, owner = self.core.DistributedSparseMoeBlock, self
         for name in ('_compute_and_schedule_next_layer_rs', 'forward',
+                     '_record_prefetch_eval_actual', '_execute_local_recv_groups',
+                     '_experts_world1_exact',
                      '_try_execute_local_recv_groups_epipe_rs_residual_scan'):
             self.originals[name] = getattr(cls, name)
         def predict(block, *args, **kwargs):
             return owner.predict(block, *args, **kwargs)
         def forward(block, hidden_states, *args, **kwargs):
             active = owner.enabled and hidden_states.shape[1] == 1
-            if active:
-                owner.activate(block)
             try:
                 return owner.originals['forward'](block, hidden_states, *args, **kwargs)
             finally:
                 if active:
+                    # A path that never reaches an expert executor must still
+                    # close its job before releasing the layer's state.
+                    if int(block.layer_idx) in owner.jobs:
+                        owner.activate_at_demand(block)
                     owner.release(block)
+        def record(block, idx, seq_len):
+            if owner.enabled and seq_len == 1:
+                layer = int(block.layer_idx)
+                assert layer not in owner.pending_accuracy
+                owner.pending_accuracy[layer] = (idx.detach(), seq_len)
+                return
+            return owner.originals['_record_prefetch_eval_actual'](block, idx, seq_len)
+        def local_execute(block, *args, **kwargs):
+            if owner.enabled and block._current_stage() == 'decode':
+                owner.activate_at_demand(block)
+            return owner.originals['_execute_local_recv_groups'](block, *args, **kwargs)
+        def world1_execute(block, *args, **kwargs):
+            if owner.enabled and block._current_stage() == 'decode':
+                owner.activate_at_demand(block)
+            return owner.originals['_experts_world1_exact'](block, *args, **kwargs)
         self.upfront = cls._try_execute_local_recv_groups_epipe
         def execute(block, *args, **kwargs):
             if owner.enabled and block._current_stage() == 'decode':
@@ -394,6 +434,9 @@ class BoundedRS:
                 return owner.upfront(block, *args, **kwargs)
             return owner.originals['_try_execute_local_recv_groups_epipe_rs_residual_scan'](block, *args, **kwargs)
         self.wrappers = dict(_compute_and_schedule_next_layer_rs=predict, forward=forward,
+                            _record_prefetch_eval_actual=record,
+                            _execute_local_recv_groups=local_execute,
+                            _experts_world1_exact=world1_execute,
                             _try_execute_local_recv_groups_epipe_rs_residual_scan=execute)
         for name, fn in self.wrappers.items():
             setattr(cls, name, fn)

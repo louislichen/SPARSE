@@ -6,7 +6,8 @@ existing expert arithmetic, router and expert-copy event wait are reused.
 
 The source layer submits prediction from its attention/residual/post-norm MoE
 input. The source MoE and the following attention continue. At entry to the
-target MoE, the adapter closes publication and exposes any already-issued
+target expert executor, after the real router and EP dispatch, the adapter
+closes publication and exposes any already-issued
 payloads to its native cache lookup and EPIPE classification. Only a real access
 waits on its matching copy event. Prediction that has not submitted a copy by
 this deadline is discarded; it cannot submit an unseen duplicate later.
@@ -20,6 +21,8 @@ Pool reuse waits for the consumer event, which also protects the evicted
 payload's earlier uses. An unused slot waits for its copy to finish. This avoids
 skipping future demand-cache hits merely because a weight arrived by prefetch.
 Admission is delayed until layer exit, so exact baseline LRU order is not claimed.
+The router's immutable indices are retained until this demand deadline for
+accuracy accounting, so delaying consumption does not remove that measurement.
 
 Use a fresh service version and install before constructing measured requests:
 

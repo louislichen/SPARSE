@@ -208,6 +208,56 @@ class StagingTest(unittest.TestCase):
         self.assertNotIn('result', calls)
         self.assertNotIn('synchronize', calls)
 
+    def test_publication_stays_open_through_real_router_and_dispatch(self):
+        events = []
+        idx = NS(detach=lambda: idx)
+        class Block:
+            layer_idx = 1
+            def _compute_and_schedule_next_layer_rs(self, *args, **kwargs):
+                pass
+            def _record_prefetch_eval_actual(self, actual, seq_len):
+                self_test.assertIs(actual, idx)
+                self_test.assertEqual(seq_len, 1)
+                events.append('accuracy')
+            def _execute_local_recv_groups(self):
+                events.append('demand')
+                return 'result'
+            def _experts_world1_exact(self):
+                return self._execute_local_recv_groups()
+            def _try_execute_local_recv_groups_epipe(self):
+                pass
+            def _try_execute_local_recv_groups_epipe_rs_residual_scan(self):
+                pass
+            def _current_stage(self):
+                return 'decode'
+            def forward(self, hidden):
+                events.append('router')
+                self._record_prefetch_eval_actual(idx, 1)
+                self_test.assertIn(1, owner.jobs, 'Target closed before dispatch')
+                events.append('dispatch')
+                return self._execute_local_recv_groups()
+        self_test = self
+        owner = BoundedRS.__new__(BoundedRS)
+        owner.core = NS(DistributedSparseMoeBlock=Block)
+        owner.enabled = True
+        owner.originals, owner.wrappers, owner.pending_accuracy = {}, {}, {}
+        owner.jobs, owner.retired, owner.views = {1: object()}, [], {}
+        owner.stats = dict(demand_deadline_activations=0)
+        def activate(block):
+            events.append('close')
+            owner.jobs.pop(block.layer_idx)
+        owner.activate = activate
+        owner.release = lambda _: events.append('release')
+        owner.pool = NS(shutdown=lambda **kwargs: None)
+        owner.install()
+        try:
+            self.assertEqual(Block().forward(NS(shape=(4, 1, 2048))), 'result')
+            self.assertEqual(events, ['router', 'dispatch', 'close', 'accuracy', 'demand', 'release'])
+            self.assertEqual(owner.pending_accuracy, {})
+            self.assertEqual(owner.stats['demand_deadline_activations'], 1)
+        finally:
+            owner.restore()
+
 
 if __name__ == '__main__':
     unittest.main()
