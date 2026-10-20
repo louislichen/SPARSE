@@ -6,12 +6,20 @@ combines co-activation-aware expert placement (SCP), next-layer expert
 prediction and prefetching (RS), and readiness-aware residual scheduling
 (EPIPE) without changing router-selected experts or combine weights.
 
-The original implementation remains at tag `sparse-independent-v1`, branch
-`baseline/independent-scheduling` and `main` (`175da8d`). This
-`research/lightweight-coupling` branch starts from that version and adds optional
-local readiness decisions within its existing asynchronous runtime. It does not
-use the synchronous global planner from the separate joint research branches.
-See [lightweight coupling](docs/LIGHTWEIGHT_COUPLING.md) for scope and validation.
+The default `main` branch publishes the SPARSE runtime preserved at
+`sparse-verified-20261019-v1` (`e768424`), before the experimental global
+SCP/EPIPE coordination mechanism. It retains SCP, RS and EPIPE, including the
+prefill cache-boundary fixes and bounded asynchronous RS staging. The serving
+code is unchanged from that snapshot; this promotion updates release notes only.
+See [bounded RS staging](docs/rs_staging.md) for its explicit integration and
+timing requirements. This snapshot is not a claim that every optional setting
+or hardware platform has a measured speedup.
+
+The earlier independent implementation remains at `sparse-independent-v1` and
+`baseline/independent-scheduling` (`175da8d`). Optional local readiness coupling
+is documented in [lightweight coupling](docs/LIGHTWEIGHT_COUPLING.md); it is not
+the later global coordination mechanism. The later mechanism and its private
+deployment experiments are not included in this release.
 
 The release is intentionally whitelist-based. It includes the code paths used
 by the paper, deterministic launchers, offline-file preparation scripts, compact source

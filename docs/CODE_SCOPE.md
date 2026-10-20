@@ -14,7 +14,11 @@ ablations remain available. Reference tables and plotting code are SPARSE
 evaluation artifacts, not comparison-system implementations.
 
 `utils/eval_core.py` contains the SPARSE serving core used for the reported physical
-experiments. Two compatibility modules remain importable because the frozen
+experiments. The release promotes `sparse-verified-20261019-v1` (`e768424`)
+without changing serving, training, solver or launcher code. The later global
+SCP/EPIPE coordination implementation is excluded; its experimental branches
+and private measurements are not merged into this release.
+Two compatibility modules remain importable because the frozen
 core resolves their symbols at module load time. They are not reachable through
 the public launchers. Removing those imports without repeating the full GPU
 regression matrix would produce a cleaner-looking but behaviorally different

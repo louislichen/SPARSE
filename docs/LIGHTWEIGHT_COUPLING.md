@@ -1,8 +1,10 @@
 # Lightweight local coupling on the independent runtime
 
-This branch starts from the preserved independent commit `175da8d`, rather than
-the synchronous global-planner branches. The original tag, `main` and both global
-joint research branches remain available. Comparison systems, model weights,
+This optional policy starts from the preserved independent commit `175da8d`, rather than
+the synchronous global-planner branches. That original implementation remains
+at `sparse-independent-v1` and `baseline/independent-scheduling`; `main` now
+publishes the pre-coordination runtime preserved at `sparse-verified-20261019-v1`.
+Earlier research branches remain available. Comparison systems, model weights,
 predictor fixtures and raw measurements are not included in the public release.
 
 ## Execution and scope
