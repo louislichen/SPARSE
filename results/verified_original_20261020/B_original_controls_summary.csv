@@ -1,0 +1,8 @@
+dataset,method,group,measurement_count,e2e_output_tok_s,service_decode_tok_s,total_h2d_gib,aggregation,e2e_gain_vs_rr_percent
+B_original_architecture_b4g2,rr,2,3,8.045990213667254,10.591353671755067,454.974609375,mean of three repeats,0.0
+B_original_architecture_b4g2,lod,2,3,6.2909707568883135,7.717285924539872,955.72705078125,mean of three repeats,-21.8123488865024
+B_original_architecture_b4g2,eplb-r96,2,3,8.046768615103614,10.667805649475461,454.79736328125,mean of three repeats,0.00967440197774394
+B_original_architecture_b4g2,prism-r32,2,3,8.061823701882135,10.545359046027533,455.490234375,mean of three repeats,0.19678731634529267
+B_original_architecture_b4g2,hot-k8,2,3,8.065949396160736,10.607597338058266,448.67431640625,mean of three repeats,0.24806371824288576
+B_original_architecture_b4g2,infinity-k1,2,3,7.472232290248607,9.615865228906902,472.87646484375,mean of three repeats,-7.130979633110135
+B_original_architecture_b4g2,sparse-original,2,6,10.923035081501538,15.604079818408703,406.36083984375,mean of six bracket measurements,35.75749897069493

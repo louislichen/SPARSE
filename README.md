@@ -27,6 +27,13 @@ tables, and fixed-canvas plotting code. It does not include model weights,
 datasets, RS checkpoints, SCP profiles, raw repeats, server logs, or private
 cluster configuration.
 
+Audited scalar results, configuration provenance, editable LaTeX tables and
+writing limits are in [original-architecture experiment evidence](results/verified_original_20261020/README.md).
+The bundle distinguishes release-aligned RS calibration from later original-
+architecture controls and earlier baseline-only results. It does not supply a
+complete same-protocol b1/b2/b4 comparison or claim an exact-checkout benchmark
+where the measurement used a later private harness.
+
 ## SPARSE Evaluation Paths
 
 The public runtime includes SPARSE, its component ablations, and the shared
