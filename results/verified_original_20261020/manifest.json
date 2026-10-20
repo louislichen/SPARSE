@@ -1,11 +1,11 @@
 {
-  "A_rs_calibration_cases.csv": "9ed645c82e3d810e1022dcb8bf3a3e936839914de0e9a118b49ca7bbc1652f47",
+  "A_rs_calibration_cases.csv": "29c2504e7f6ab9e75ac012bed6a568a80b232b707f0a9b6f5dc82768a34ba282",
   "provenance.json": "1f5f2e49a90927ea8a14c198e643a2e9f470236d80a9d0ed2f3768d97d4bc56c",
-  "C_earlier_baseline_only_summary.csv": "9dee605bad8e76090fdbabe7182ba5ca5d80a1d232001c311003700576401732",
-  "B_original_controls_summary.csv": "e073a9b59879ddc0b8d6ee16991d479ad9d8191869b4d119eae0a7aa6053266f",
+  "C_earlier_baseline_only_summary.csv": "611931ecaf0dd45d39e4201dd71467198ea66990d1233a4f3183ef9f02c0bbfa",
+  "B_original_controls_summary.csv": "d520308d4c0393059656097ee42d308d82fc9cb6599535e7eb973cd191e4ec00",
   "README.md": "9f33fb5c537704e78d9d56ae305265be38fa00b36a4cadddd259453d07f85d9c",
   "paper_tables.tex": "8b11e8da2e23851c14eb0086c006c499f331d3ef436a363990923e902dc8ac04",
-  "B_original_controls_rank_repeats.csv": "ea0f7cf95f95593bf32449445fe2931e07dc9654395290ae3872ba789e00e88b",
+  "B_original_controls_rank_repeats.csv": "8d7840492593e2d3c7a269fa54d5b260978398b9cd3ab3c1de853eba14a38fe8",
   "source_hashes.json": "80f60d6d20e6f4ec03ad8c7dd6f16cce93824991de0d6aaf7b664bad2b91b756",
-  "B_original_controls_repeats.csv": "abbacfac5b2fe543ca05c8141e9897970efd122f5337bd618d793196dc13798b"
+  "B_original_controls_repeats.csv": "c53fb792d42de6ca8dee9c0909a2a3455765de21071da0b9a6cb28ae83ddfa47"
 }
