@@ -248,3 +248,7 @@ and [docs/RUNNING_THE_CODE.md](docs/RUNNING_THE_CODE.md) for expected
 reviewer workflows and outputs. [docs/CODE_SCOPE.md](docs/CODE_SCOPE.md)
 documents the whitelist and the small compatibility boundary retained by the
 frozen runtime core.
+
+## Original SPARSE b1/b2 measurements
+
+[SPARSE-only b1/b2 measurements](results/original_sparse_b1b2_20261020/README.md), four groups and three repeats. Existing b4 and baseline results retain their separate resource/protocol scopes.

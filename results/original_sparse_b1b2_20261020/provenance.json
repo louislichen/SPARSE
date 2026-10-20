@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "run_id": "original-sparse-b1b2-20261020-v2",
+  "status": "PASS_SPARSE_B1_B2",
+  "method": "Original SPARSE",
+  "global_coordination_installed": false,
+  "measured_serving_commit": "49b79a8b8672aaac41791b0c32e90a48f5c64bdc",
+  "public_serving_snapshot": "e7684242c922e3a45fa77dc66aad76176be9a2ed",
+  "exact_public_checkout_benchmark": false,
+  "code_relationship": "Published e768424 original architecture through existing later frozen private baseline/managed-RS harness; not an identical public checkout benchmark.",
+  "gpus": [
+    "2x RTX4090",
+    "2x RTX3090"
+  ],
+  "nodes": 2,
+  "ep_size": 4,
+  "model": "Qwen1.5-MoE-A2.7B",
+  "dtype": "float16",
+  "shapes": {
+    "b1": {
+      "batch": 1,
+      "prompt_len": 1024,
+      "max_new_tokens": 32
+    },
+    "b2": {
+      "batch": 2,
+      "prompt_len": 512,
+      "max_new_tokens": 64
+    }
+  },
+  "groups": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "warmup": 1,
+  "warmup_new_tokens": 8,
+  "repeat": 3,
+  "sparse_full_rank_outputs": 96,
+  "rr_reference_full_rank_outputs": 32,
+  "warmup_prefix_checks": 64,
+  "rr_purpose": "One full reference per group/rank for strict correctness only; no repeated baseline benchmark or gain estimate published.",
+  "source_protocol_sha256": "25e5c4bfa4b5a65510bccf2b8aa72f890ad855383188bc32b2afd9b7b2dda176",
+  "source_freeze_sha256": "17bcee15ffc232f85a36f0edbd94883e8e225d39483d69a336a0d896427e117d",
+  "source_audit_sha256": "956cbed9dab7ce3432080b7222ff0018c79a6ea9b82b0c7f52e7f29238e986da",
+  "historical_timing_pooled": false,
+  "b4_repeated": false,
+  "baseline_repeated": false,
+  "parameters_reselected": false,
+  "prefill_math": "fixed64",
+  "native_decode_granularity": 1,
+  "cache_entries": 8,
+  "rs_scratch_slots": 4,
+  "rs_copy_budget": 2,
+  "scp_extra_cpu_copies": 420,
+  "inventory_extra_cpu_copies": 561,
+  "token_counting": "ep_rank0_only; duplicate rank inputs counted once",
+  "aggregation": "Max rank latency; sum rank demand+prefetch H2D. Mean of3 repeats per group, mean/sample SD of4 group means.",
+  "duplicate_publications_counter": "Not available in this frozen version; not inferred zero.",
+  "raw_tokens_weights_checkpoints_and_host_identifiers_published": false
+}
